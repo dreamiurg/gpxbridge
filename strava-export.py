@@ -30,8 +30,9 @@ import gpxpy
 import gpxpy.gpx
 import time
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings
+from typing import Tuple
 from pathlib import Path
 from slugify import slugify
 from tenacity import (
@@ -107,39 +108,167 @@ def validate_output_path(output_dir: str) -> Path:
         return Path("./gpx_exports").resolve()
 
 
+class Coordinate(BaseModel):
+    """GPS coordinate with validation"""
+
+    latitude: float = Field(..., ge=-90.0, le=90.0, description="Latitude in degrees")
+    longitude: float = Field(
+        ..., ge=-180.0, le=180.0, description="Longitude in degrees"
+    )
+
+    @classmethod
+    def from_tuple(cls, coord_tuple: Tuple[float, float]) -> "Coordinate":
+        """Create coordinate from tuple [lat, lng]"""
+        if len(coord_tuple) != 2:
+            raise ValueError("Coordinate tuple must have exactly 2 elements")
+        return cls(latitude=coord_tuple[0], longitude=coord_tuple[1])
+
+
+class GPSPoint(BaseModel):
+    """GPS point with comprehensive validation"""
+
+    coordinate: Coordinate
+    time_offset_seconds: Optional[float] = Field(
+        None, ge=0, description="Seconds from activity start"
+    )
+    elevation_meters: Optional[float] = Field(
+        None, ge=-1000, le=10000, description="Elevation in meters"
+    )
+
+    @field_validator("time_offset_seconds")
+    @classmethod
+    def validate_time_offset(cls, v):
+        if v is not None and v > 86400 * 7:  # More than 7 days seems unreasonable
+            raise ValueError("Time offset too large (max 7 days)")
+        return v
+
+
 class StravaSettings(BaseSettings):
     """Strava API configuration using environment variables"""
 
     client_id: str = Field(
-        ..., env="STRAVA_CLIENT_ID", description="Strava API client ID"
+        ..., env="STRAVA_CLIENT_ID", description="Strava API client ID", min_length=1
     )
     client_secret: str = Field(
-        ..., env="STRAVA_CLIENT_SECRET", description="Strava API client secret"
+        ...,
+        env="STRAVA_CLIENT_SECRET",
+        description="Strava API client secret",
+        min_length=1,
     )
     refresh_token: str = Field(
-        ..., env="STRAVA_REFRESH_TOKEN", description="Strava refresh token"
+        ...,
+        env="STRAVA_REFRESH_TOKEN",
+        description="Strava refresh token",
+        min_length=1,
     )
 
 
 class Activity(BaseModel):
-    """Strava activity model with explicit units"""
+    """Strava activity model with explicit units and validation"""
 
-    id: int
-    name: str
-    type: str
-    start_date_local: str
-    distance_meters: Optional[float] = None
-    moving_time_seconds: Optional[int] = None
-    total_elevation_gain_meters: Optional[float] = None
+    id: int = Field(..., gt=0, description="Strava activity ID")
+    name: str = Field(..., min_length=1, max_length=200, description="Activity name")
+    type: str = Field(..., min_length=1, max_length=50, description="Activity type")
+    start_date_local: str = Field(..., description="Activity start date in local time")
+    distance_meters: Optional[float] = Field(
+        None, ge=0, description="Distance in meters"
+    )
+    moving_time_seconds: Optional[int] = Field(
+        None, ge=0, description="Moving time in seconds"
+    )
+    total_elevation_gain_meters: Optional[float] = Field(
+        None, ge=0, description="Elevation gain in meters"
+    )
+
+    @field_validator("start_date_local")
+    @classmethod
+    def validate_date_format(cls, v):
+        """Validate date string can be parsed by Arrow"""
+        try:
+            arrow.get(v)
+            return v
+        except (arrow.ParserError, ValueError) as e:
+            raise ValueError(f"Invalid date format: {e}")
+
+    @field_validator("name", "type")
+    @classmethod
+    def validate_string_fields(cls, v):
+        """Ensure string fields are properly cleaned"""
+        if not v or not v.strip():
+            raise ValueError("Field cannot be empty or whitespace only")
+        return v.strip()
+
+
+class ExportConfig(BaseModel):
+    """Configuration for export operations with validation"""
+
+    count: int = Field(
+        ..., gt=0, le=10000, description="Number of activities to export"
+    )
+    output_dir: str = Field(..., min_length=1, description="Output directory path")
+    delay_seconds: float = Field(..., ge=0, le=60, description="Delay between requests")
+    organize_by_type: bool = Field(
+        default=False, description="Organize files by activity type"
+    )
+    resume: bool = Field(default=False, description="Resume from previous export")
+
+    @field_validator("output_dir")
+    @classmethod
+    def validate_output_dir(cls, v):
+        """Validate output directory path"""
+        if not v or not v.strip():
+            raise ValueError("Output directory cannot be empty")
+
+        # Basic path validation
+        try:
+            Path(v)
+            return v.strip()
+        except (ValueError, OSError) as e:
+            raise ValueError(f"Invalid path: {e}")
 
 
 class RateLimitInfo(BaseModel):
-    """Rate limit tracking model"""
+    """Rate limit tracking model with validation"""
 
-    fifteen_min_usage: int = Field(default=0, alias="15min_usage")
-    fifteen_min_limit: int = Field(default=100, alias="15min_limit")
-    daily_usage: int = Field(default=0, alias="daily_usage")
-    daily_limit: int = Field(default=1000, alias="daily_limit")
+    fifteen_min_usage: int = Field(default=0, ge=0, alias="15min_usage")
+    fifteen_min_limit: int = Field(default=100, gt=0, alias="15min_limit")
+    daily_usage: int = Field(default=0, ge=0, alias="daily_usage")
+    daily_limit: int = Field(default=1000, gt=0, alias="daily_limit")
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_limits(cls, values):
+        """Ensure usage doesn't exceed limits"""
+        if isinstance(values, dict):
+            if values.get("fifteen_min_usage", 0) > values.get(
+                "fifteen_min_limit", 100
+            ):
+                values["fifteen_min_usage"] = values.get("fifteen_min_limit", 100)
+            if values.get("daily_usage", 0) > values.get("daily_limit", 1000):
+                values["daily_usage"] = values.get("daily_limit", 1000)
+        return values
+
+
+class ProgressData(BaseModel):
+    """Progress tracking data with validation"""
+
+    exported_activities: List[int] = Field(
+        default_factory=list, description="List of exported activity IDs"
+    )
+    last_activity_index: int = Field(
+        default=0, ge=0, description="Index of last processed activity"
+    )
+
+    @field_validator("exported_activities")
+    @classmethod
+    def validate_activity_ids(cls, v):
+        """Ensure all activity IDs are positive integers"""
+        if not isinstance(v, list):
+            raise ValueError("exported_activities must be a list")
+        for activity_id in v:
+            if not isinstance(activity_id, int) or activity_id <= 0:
+                raise ValueError(f"Invalid activity ID: {activity_id}")
+        return v
 
 
 class StravaExporter:
@@ -152,12 +281,7 @@ class StravaExporter:
         self.access_token = None
         self.base_url = "https://www.strava.com/api/v3"
         self.delay = delay  # Delay between requests in seconds
-        self.rate_limit_info = {
-            "15min_usage": 0,
-            "15min_limit": 100,
-            "daily_usage": 0,
-            "daily_limit": 1000,
-        }
+        self.rate_limit_info = RateLimitInfo()
 
     def get_access_token(self) -> bool:
         """Exchange refresh token for access token"""
@@ -189,37 +313,40 @@ class StravaExporter:
         usage_header = response.headers.get("X-RateLimit-Usage")
         limit_header = response.headers.get("X-RateLimit-Limit")
 
-        if usage_header:
-            # Format: "15min_usage,daily_usage"
-            try:
+        try:
+            update_data = {}
+
+            if usage_header:
+                # Format: "15min_usage,daily_usage"
                 parts = usage_header.split(",")
                 if len(parts) >= 2:
-                    self.rate_limit_info["15min_usage"] = int(parts[0].strip())
-                    self.rate_limit_info["daily_usage"] = int(parts[1].strip())
-            except (ValueError, AttributeError) as e:
-                logger.warning(
-                    f"Failed to parse rate limit usage header '{usage_header}': {e}"
-                )
+                    update_data["fifteen_min_usage"] = int(parts[0].strip())
+                    update_data["daily_usage"] = int(parts[1].strip())
 
-        if limit_header:
-            # Format: "15min_limit,daily_limit"
-            try:
+            if limit_header:
+                # Format: "15min_limit,daily_limit"
                 parts = limit_header.split(",")
                 if len(parts) >= 2:
-                    self.rate_limit_info["15min_limit"] = int(parts[0].strip())
-                    self.rate_limit_info["daily_limit"] = int(parts[1].strip())
-            except (ValueError, AttributeError) as e:
-                logger.warning(
-                    f"Failed to parse rate limit header '{limit_header}': {e}"
-                )
+                    update_data["fifteen_min_limit"] = int(parts[0].strip())
+                    update_data["daily_limit"] = int(parts[1].strip())
+
+            if update_data:
+                # Update with validated data
+                current_data = self.rate_limit_info.model_dump()
+                current_data.update(update_data)
+                self.rate_limit_info = RateLimitInfo(**current_data)
+
+        except (ValueError, AttributeError, Exception) as e:
+            logger.warning(f"Failed to parse rate limit headers: {e}")
 
     def check_rate_limit(self):
         """Check if we're approaching rate limits and warn user"""
         fifteen_min_pct = (
-            self.rate_limit_info["15min_usage"] / self.rate_limit_info["15min_limit"]
+            self.rate_limit_info.fifteen_min_usage
+            / self.rate_limit_info.fifteen_min_limit
         ) * 100
         daily_pct = (
-            self.rate_limit_info["daily_usage"] / self.rate_limit_info["daily_limit"]
+            self.rate_limit_info.daily_usage / self.rate_limit_info.daily_limit
         ) * 100
 
         if fifteen_min_pct > 80:
@@ -520,26 +647,14 @@ class StravaExporter:
                 with progress_file.open("r") as f:
                     data = json.load(f)
 
-                # Validate progress file structure
-                if not isinstance(data, dict):
-                    logger.warning("Progress file has invalid format, starting fresh")
-                    return {"exported_activities": [], "last_activity_index": 0}
-
-                # Ensure required fields exist with correct types
-                exported_activities = data.get("exported_activities", [])
-                last_activity_index = data.get("last_activity_index", 0)
-
-                if not isinstance(exported_activities, list):
-                    exported_activities = []
-                if not isinstance(last_activity_index, int) or last_activity_index < 0:
-                    last_activity_index = 0
-
+                # Validate using Pydantic model
+                progress_data = ProgressData(**data)
                 return {
-                    "exported_activities": exported_activities,
-                    "last_activity_index": last_activity_index,
+                    "exported_activities": progress_data.exported_activities,
+                    "last_activity_index": progress_data.last_activity_index,
                 }
 
-            except (OSError, json.JSONDecodeError) as e:
+            except (OSError, json.JSONDecodeError, Exception) as e:
                 logger.warning(f"Failed to load progress file: {e}, starting fresh")
 
         return {"exported_activities": [], "last_activity_index": 0}
@@ -627,12 +742,11 @@ class StravaExporter:
             # Show rate limit status periodically
             if activity_num % 10 == 0:
                 fifteen_min_pct = (
-                    self.rate_limit_info["15min_usage"]
-                    / self.rate_limit_info["15min_limit"]
+                    self.rate_limit_info.fifteen_min_usage
+                    / self.rate_limit_info.fifteen_min_limit
                 ) * 100
                 daily_pct = (
-                    self.rate_limit_info["daily_usage"]
-                    / self.rate_limit_info["daily_limit"]
+                    self.rate_limit_info.daily_usage / self.rate_limit_info.daily_limit
                 ) * 100
                 click.echo(
                     f"📊 Rate limit usage: {fifteen_min_pct:.1f}% (15min), {daily_pct:.1f}% (daily)"
@@ -719,37 +833,17 @@ def main(
     3. Install dependencies: pip install requests gpxpy click
     """
 
-    # Validate CLI arguments
-    validation_errors = []
-
-    # Check credentials
-    if not all([client_id, client_secret, refresh_token]):
-        validation_errors.append("Missing Strava API credentials")
-
-    # Validate count parameter
-    if count <= 0:
-        validation_errors.append(f"Count must be positive, got: {count}")
-    if count > 10000:  # Reasonable upper limit
-        validation_errors.append(f"Count too large (max 10000), got: {count}")
-
-    # Validate delay parameter
-    if delay < 0:
-        validation_errors.append(f"Delay must be non-negative, got: {delay}")
-    if delay > 60:  # Reasonable upper limit
-        click.echo(
-            f"⚠ Warning: Large delay value ({delay}s) may slow down exports significantly"
-        )
-
-    # Validate output directory
-    if not output_dir or not isinstance(output_dir, str):
-        validation_errors.append("Output directory must be a valid string")
-
-    if validation_errors:
-        click.echo("⚠ Validation errors found:", err=True)
-        for error in validation_errors:
-            click.echo(f"  - {error}", err=True)
-
-        if not all([client_id, client_secret, refresh_token]):
+    # Validate using Pydantic models
+    try:
+        # Validate credentials (only if all provided)
+        if all([client_id, client_secret, refresh_token]):
+            StravaSettings(
+                client_id=client_id,
+                client_secret=client_secret,
+                refresh_token=refresh_token,
+            )
+        else:
+            click.echo("⚠ Missing Strava API credentials", err=True)
             click.echo("\nOptions to provide credentials:")
             click.echo("1. Environment variables:")
             click.echo("   export STRAVA_CLIENT_ID='your_client_id'")
@@ -763,7 +857,25 @@ def main(
             click.echo("1. Go to https://www.strava.com/settings/api")
             click.echo("2. Create a new application")
             click.echo("3. Follow OAuth flow to get refresh token")
+            raise click.Abort()
 
+        # Validate export configuration
+        ExportConfig(
+            count=count,
+            output_dir=output_dir,
+            delay_seconds=delay,
+            organize_by_type=organize_by_type,
+            resume=resume,
+        )
+
+        # Show warning for large delay values
+        if delay > 60:
+            click.echo(
+                f"⚠ Warning: Large delay value ({delay}s) may slow down exports significantly"
+            )
+
+    except Exception as e:
+        click.echo(f"⚠ Validation error: {e}", err=True)
         raise click.Abort()
 
     # Create exporter and run with validated parameters
