@@ -63,21 +63,52 @@ class StravaExporter:
         """Get authorization headers for API requests"""
         return {"Authorization": f"Bearer {self.access_token}"}
     
-    def get_recent_activities(self, per_page: int = 30) -> List[Dict]:
-        """Fetch recent activities from Strava"""
-        try:
-            response = requests.get(
-                f"{self.base_url}/athlete/activities",
-                headers=self.get_headers(),
-                params={"per_page": per_page}
-            )
-            response.raise_for_status()
-            activities = response.json()
-            click.echo(f"✓ Found {len(activities)} recent activities")
-            return activities
-        except requests.exceptions.RequestException as e:
-            click.echo(f"✗ Failed to fetch activities: {e}", err=True)
-            return []
+    def get_recent_activities(self, count: int = 30) -> List[Dict]:
+        """Fetch recent activities from Strava with pagination support"""
+        activities = []
+        page = 1
+        per_page = 200  # Strava API max is 200 per page
+        
+        click.echo(f"Fetching {count} activities with pagination (max {per_page} per request)...")
+        
+        while len(activities) < count:
+            try:
+                remaining = count - len(activities)
+                current_per_page = min(per_page, remaining)
+                
+                click.echo(f"  Requesting page {page} with {current_per_page} activities...")
+                
+                response = requests.get(
+                    f"{self.base_url}/athlete/activities",
+                    headers=self.get_headers(),
+                    params={"per_page": current_per_page, "page": page}
+                )
+                response.raise_for_status()
+                page_activities = response.json()
+                
+                if not page_activities:
+                    # No more activities available
+                    click.echo(f"  No more activities available on page {page}")
+                    break
+                    
+                activities.extend(page_activities)
+                click.echo(f"  Retrieved {len(page_activities)} activities (total: {len(activities)})")
+                
+                if len(page_activities) < current_per_page:
+                    # Fewer activities returned than requested, we've reached the end
+                    click.echo(f"  Reached end of activities (got {len(page_activities)}, expected {current_per_page})")
+                    break
+                    
+                page += 1
+                
+            except requests.exceptions.RequestException as e:
+                click.echo(f"✗ Failed to fetch activities: {e}", err=True)
+                return activities
+        
+        # Trim to exact count requested
+        activities = activities[:count]
+        click.echo(f"✓ Found {len(activities)} recent activities")
+        return activities
     
     def get_activity_streams(self, activity_id: int) -> Optional[Dict]:
         """Get activity stream data (coordinates, time, etc.)"""
@@ -103,8 +134,14 @@ class StravaExporter:
             return None
             
         gpx = gpxpy.gpx.GPX()
+        
+        # Set GPX metadata from Strava activity
         gpx.name = activity.get("name", f"Activity {activity['id']}")
-        gpx.description = f"Exported from Strava - {activity.get('type', 'Unknown')} activity"
+        gpx.description = f"https://www.strava.com/activities/{activity['id']}"
+        
+        # Set creation time to activity start time
+        start_time = datetime.fromisoformat(activity["start_date_local"].replace("Z", "+00:00"))
+        gpx.time = start_time
         
         # Create track
         gpx_track = gpxpy.gpx.GPXTrack()
@@ -147,7 +184,7 @@ class StravaExporter:
         
         return gpx
     
-    def export_activity_to_gpx(self, activity: Dict, output_dir: str = "gpx_exports") -> bool:
+    def export_activity_to_gpx(self, activity: Dict, output_dir: str = "gpx_exports", organize_by_type: bool = False) -> bool:
         """Export a single activity to GPX file"""
         activity_id = activity["id"]
         activity_name = activity.get("name", f"Activity {activity_id}")
@@ -166,15 +203,23 @@ class StravaExporter:
         if not gpx:
             return False
         
+        # Determine final output directory
+        if organize_by_type:
+            # Create subdirectory for activity type
+            safe_type_dir = "".join(c for c in activity_type.lower() if c.isalnum() or c in ('-', '_'))
+            final_output_dir = os.path.join(output_dir, safe_type_dir)
+        else:
+            final_output_dir = output_dir
+        
         # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(final_output_dir, exist_ok=True)
         
         # Generate filename
         safe_name = "".join(c for c in activity_name if c.isalnum() or c in (' ', '-', '_')).strip()[:30]
         safe_name = safe_name.replace(' ', '-')
         safe_type = "".join(c for c in activity_type if c.isalnum() or c in ('-', '_'))
         filename = f"{start_date.strftime('%Y%m%d')}_{safe_type}_{safe_name}_{activity_id}.gpx"
-        filepath = os.path.join(output_dir, filename)
+        filepath = os.path.join(final_output_dir, filename)
         
         # Write GPX file
         try:
@@ -186,7 +231,7 @@ class StravaExporter:
             click.echo(f"  ✗ Failed to save {filepath}: {e}", err=True)
             return False
     
-    def export_recent_activities(self, count: int = 10, output_dir: str = "gpx_exports"):
+    def export_recent_activities(self, count: int = 10, output_dir: str = "gpx_exports", organize_by_type: bool = False):
         """Export recent activities to GPX files"""
         if not self.get_access_token():
             return
@@ -202,7 +247,7 @@ class StravaExporter:
         success_count = 0
         
         for activity in activities:
-            if self.export_activity_to_gpx(activity, output_dir):
+            if self.export_activity_to_gpx(activity, output_dir, organize_by_type):
                 success_count += 1
         
         click.echo(f"\n✓ Successfully exported {success_count}/{len(activities)} activities")
@@ -226,7 +271,10 @@ class StravaExporter:
 @click.option("--output-dir", 
               default="gpx_exports",
               help="Output directory for GPX files (default: gpx_exports)")
-def main(client_id, client_secret, refresh_token, count, output_dir):
+@click.option("--organize-by-type", 
+              is_flag=True,
+              help="Create subdirectories for each activity type")
+def main(client_id, client_secret, refresh_token, count, output_dir, organize_by_type):
     """Export Strava activities as GPX files.
     
     This tool exports recent activities from your Strava account as GPX files.
@@ -257,7 +305,7 @@ def main(client_id, client_secret, refresh_token, count, output_dir):
     
     # Create exporter and run
     exporter = StravaExporter(client_id, client_secret, refresh_token)
-    exporter.export_recent_activities(count=count, output_dir=output_dir)
+    exporter.export_recent_activities(count=count, output_dir=output_dir, organize_by_type=organize_by_type)
 
 if __name__ == "__main__":
     main()
