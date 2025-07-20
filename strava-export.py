@@ -42,6 +42,71 @@ from tenacity import (
 )
 
 
+def safe_get_nested(data: dict, keys: list, default=None):
+    """Safely get nested dictionary values"""
+    try:
+        for key in keys:
+            data = data[key]
+        return data
+    except (KeyError, TypeError):
+        return default
+
+
+def validate_coordinates(lat: float, lng: float) -> bool:
+    """Validate latitude and longitude are within valid ranges"""
+    try:
+        lat_f = float(lat)
+        lng_f = float(lng)
+        return -90.0 <= lat_f <= 90.0 and -180.0 <= lng_f <= 180.0
+    except (ValueError, TypeError):
+        return False
+
+
+def safe_parse_date(date_str: str, fallback_name: str = "Unknown") -> arrow.Arrow:
+    """Safely parse date string with fallback"""
+    try:
+        return arrow.get(date_str)
+    except (arrow.ParserError, TypeError, ValueError) as e:
+        logger.warning(f"Failed to parse date '{date_str}' for {fallback_name}: {e}")
+        return arrow.now()
+
+
+def safe_slugify(text: str, max_length: int = 30, fallback: str = "unknown") -> str:
+    """Safely slugify text with fallback for empty results"""
+    if not text or not isinstance(text, str):
+        return fallback
+
+    result = slugify(text, max_length=max_length)
+    return result if result else fallback
+
+
+def validate_output_path(output_dir: str) -> Path:
+    """Validate and resolve output directory path to prevent traversal"""
+    try:
+        # Resolve the path and ensure it's absolute
+        path = Path(output_dir).resolve()
+
+        # Ensure it's not trying to escape the current working directory
+        cwd = Path.cwd().resolve()
+
+        # Check if the path is within or adjacent to CWD (allow relative paths)
+        try:
+            path.relative_to(cwd.parent)
+        except ValueError:
+            # Path is outside allowed area, use safe default
+            logger.warning(
+                f"Output path '{output_dir}' outside safe area, using './gpx_exports'"
+            )
+            return Path("./gpx_exports").resolve()
+
+        return path
+    except (OSError, ValueError) as e:
+        logger.warning(
+            f"Invalid output path '{output_dir}': {e}, using './gpx_exports'"
+        )
+        return Path("./gpx_exports").resolve()
+
+
 class StravaSettings(BaseSettings):
     """Strava API configuration using environment variables"""
 
@@ -126,17 +191,27 @@ class StravaExporter:
 
         if usage_header:
             # Format: "15min_usage,daily_usage"
-            parts = usage_header.split(",")
-            if len(parts) >= 2:
-                self.rate_limit_info["15min_usage"] = int(parts[0])
-                self.rate_limit_info["daily_usage"] = int(parts[1])
+            try:
+                parts = usage_header.split(",")
+                if len(parts) >= 2:
+                    self.rate_limit_info["15min_usage"] = int(parts[0].strip())
+                    self.rate_limit_info["daily_usage"] = int(parts[1].strip())
+            except (ValueError, AttributeError) as e:
+                logger.warning(
+                    f"Failed to parse rate limit usage header '{usage_header}': {e}"
+                )
 
         if limit_header:
             # Format: "15min_limit,daily_limit"
-            parts = limit_header.split(",")
-            if len(parts) >= 2:
-                self.rate_limit_info["15min_limit"] = int(parts[0])
-                self.rate_limit_info["daily_limit"] = int(parts[1])
+            try:
+                parts = limit_header.split(",")
+                if len(parts) >= 2:
+                    self.rate_limit_info["15min_limit"] = int(parts[0].strip())
+                    self.rate_limit_info["daily_limit"] = int(parts[1].strip())
+            except (ValueError, AttributeError) as e:
+                logger.warning(
+                    f"Failed to parse rate limit header '{limit_header}': {e}"
+                )
 
     def check_rate_limit(self):
         """Check if we're approaching rate limits and warn user"""
@@ -275,57 +350,94 @@ class StravaExporter:
         self, activity: Dict, streams: Dict
     ) -> Optional[gpxpy.gpx.GPX]:
         """Convert Strava activity streams to GPX format"""
-        if not streams or "latlng" not in streams:
-            click.echo(f"  ⚠ No GPS data available for activity {activity['id']}")
+        # Validate required data
+        latlng_data = safe_get_nested(streams, ["latlng", "data"])
+        if not latlng_data:
+            activity_id = activity.get("id", "unknown")
+            logger.warning(f"No GPS data available for activity {activity_id}")
             return None
 
         gpx = gpxpy.gpx.GPX()
 
-        # Set GPX metadata from Strava activity
-        gpx.name = activity.get("name", f"Activity {activity['id']}")
-        gpx.description = f"https://www.strava.com/activities/{activity['id']}"
+        # Set GPX metadata from Strava activity with safe access
+        activity_id = activity.get("id", "unknown")
+        activity_name = activity.get("name", f"Activity {activity_id}")
 
-        # Set creation time to activity start time
-        start_time = arrow.get(activity["start_date_local"])
+        gpx.name = activity_name
+        gpx.description = f"https://www.strava.com/activities/{activity_id}"
+
+        # Set creation time to activity start time with safe parsing
+        date_str = activity.get("start_date_local", "")
+        start_time = safe_parse_date(date_str, activity_name)
         gpx.time = start_time.datetime
 
         # Create track
         gpx_track = gpxpy.gpx.GPXTrack()
-        gpx_track.name = activity.get("name", f"Activity {activity['id']}")
+        gpx_track.name = activity_name
         gpx.tracks.append(gpx_track)
 
         # Create track segment
         gpx_segment = gpxpy.gpx.GPXTrackSegment()
         gpx_track.segments.append(gpx_segment)
 
-        # Get data streams
-        latlng_data = streams["latlng"]["data"]
-        time_data = streams.get("time", {}).get("data", [])
-        altitude_data = streams.get("altitude", {}).get("data", [])
-        heartrate_data = streams.get("heartrate", {}).get("data", [])
+        # Get data streams with safe access
+        time_data = safe_get_nested(streams, ["time", "data"], [])
+        altitude_data = safe_get_nested(streams, ["altitude", "data"], [])
+        # heartrate_data = safe_get_nested(streams, ["heartrate", "data"], [])  # TODO: Implement heart rate extensions
 
-        # Parse start time
-        start_time = arrow.get(activity["start_date_local"])
+        # Create track points with validation
+        valid_points = 0
+        for i, coords in enumerate(latlng_data):
+            try:
+                # Validate coordinate structure
+                if not isinstance(coords, (list, tuple)) or len(coords) < 2:
+                    continue
 
-        # Create track points
-        for i, (lat, lng) in enumerate(latlng_data):
-            point = gpxpy.gpx.GPXTrackPoint(latitude=lat, longitude=lng)
+                lat, lng = coords[0], coords[1]
 
-            # Add timestamp
-            if i < len(time_data):
-                point.time = start_time.shift(seconds=time_data[i]).datetime
+                # Validate coordinate values
+                if not validate_coordinates(lat, lng):
+                    logger.debug(
+                        f"Invalid coordinates at point {i}: lat={lat}, lng={lng}"
+                    )
+                    continue
 
-            # Add elevation
-            if i < len(altitude_data):
-                point.elevation = altitude_data[i]
+                point = gpxpy.gpx.GPXTrackPoint(
+                    latitude=float(lat), longitude=float(lng)
+                )
 
-            # Add heart rate as extension
-            if i < len(heartrate_data):
-                # Note: GPX heart rate extensions require additional XML handling
-                # For simplicity, we'll skip this in the basic implementation
-                pass
+                # Add timestamp with validation
+                if i < len(time_data) and isinstance(time_data[i], (int, float)):
+                    try:
+                        point.time = start_time.shift(seconds=time_data[i]).datetime
+                    except (ValueError, OverflowError):
+                        pass  # Skip invalid time offset
 
-            gpx_segment.points.append(point)
+                # Add elevation with validation
+                if i < len(altitude_data) and isinstance(
+                    altitude_data[i], (int, float)
+                ):
+                    try:
+                        elevation = float(altitude_data[i])
+                        if -1000 <= elevation <= 10000:  # Reasonable elevation range
+                            point.elevation = elevation
+                    except (ValueError, OverflowError):
+                        pass  # Skip invalid elevation
+
+                gpx_segment.points.append(point)
+                valid_points += 1
+
+            except (ValueError, TypeError, IndexError) as e:
+                logger.debug(f"Skipping invalid point {i}: {e}")
+                continue
+
+        if valid_points == 0:
+            logger.warning(f"No valid GPS points found for activity {activity_id}")
+            return None
+
+        logger.debug(
+            f"Created GPX with {valid_points} valid points for activity {activity_id}"
+        )
 
         return gpx
 
@@ -336,10 +448,14 @@ class StravaExporter:
         organize_by_type: bool = False,
     ) -> bool:
         """Export a single activity to GPX file"""
-        activity_id = activity["id"]
+        # Safe data extraction with validation
+        activity_id = activity.get("id", "unknown")
         activity_name = activity.get("name", f"Activity {activity_id}")
         activity_type = activity.get("type", "Unknown")
-        start_date = arrow.get(activity["start_date_local"])
+
+        # Safe date parsing
+        date_str = activity.get("start_date_local", "")
+        start_date = safe_parse_date(date_str, activity_name)
 
         click.echo(
             f"  Processing: {start_date.format('YYYY-MM-DD')} | {activity_type} | {activity_name}"
@@ -355,23 +471,35 @@ class StravaExporter:
         if not gpx:
             return False
 
-        # Determine final output directory
-        output_path = Path(output_dir)
+        # Validate and determine final output directory
+        output_path = validate_output_path(output_dir)
         if organize_by_type:
-            # Create subdirectory for activity type
-            safe_type_dir = slugify(activity_type.lower())
+            # Create subdirectory for activity type with safe slugification
+            safe_type_dir = safe_slugify(activity_type.lower(), fallback="unknown-type")
             final_output_path = output_path / safe_type_dir
         else:
             final_output_path = output_path
 
         # Create output directory
-        final_output_path.mkdir(parents=True, exist_ok=True)
+        try:
+            final_output_path.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError) as e:
+            logger.error(
+                f"Failed to create output directory '{final_output_path}': {e}"
+            )
+            return False
 
-        # Generate filename with proper slugification
-        safe_name = slugify(activity_name, max_length=30)
-        safe_type = slugify(activity_type)
+        # Generate filename with safe slugification
+        safe_name = safe_slugify(
+            activity_name, max_length=30, fallback="unnamed-activity"
+        )
+        safe_type = safe_slugify(activity_type, fallback="unknown-type")
+
+        # Ensure activity_id is safe for filename
+        safe_id = str(activity_id).replace("/", "-").replace("\\", "-")
+
         filename = (
-            f"{start_date.format('YYYYMMDD')}_{safe_type}_{safe_name}_{activity_id}.gpx"
+            f"{start_date.format('YYYYMMDD')}_{safe_type}_{safe_name}_{safe_id}.gpx"
         )
         filepath = final_output_path / filename
 
@@ -390,18 +518,53 @@ class StravaExporter:
         if progress_file.exists():
             try:
                 with progress_file.open("r") as f:
-                    return json.load(f)
-            except (OSError, json.JSONDecodeError):
-                pass
+                    data = json.load(f)
+
+                # Validate progress file structure
+                if not isinstance(data, dict):
+                    logger.warning("Progress file has invalid format, starting fresh")
+                    return {"exported_activities": [], "last_activity_index": 0}
+
+                # Ensure required fields exist with correct types
+                exported_activities = data.get("exported_activities", [])
+                last_activity_index = data.get("last_activity_index", 0)
+
+                if not isinstance(exported_activities, list):
+                    exported_activities = []
+                if not isinstance(last_activity_index, int) or last_activity_index < 0:
+                    last_activity_index = 0
+
+                return {
+                    "exported_activities": exported_activities,
+                    "last_activity_index": last_activity_index,
+                }
+
+            except (OSError, json.JSONDecodeError) as e:
+                logger.warning(f"Failed to load progress file: {e}, starting fresh")
+
         return {"exported_activities": [], "last_activity_index": 0}
 
     def save_progress(self, progress_file: Path, progress: Dict):
-        """Save export progress to file"""
+        """Save export progress to file with atomic write"""
         try:
-            with progress_file.open("w") as f:
+            # Use atomic write by writing to temp file first
+            temp_file = progress_file.with_suffix(progress_file.suffix + ".tmp")
+
+            with temp_file.open("w") as f:
                 json.dump(progress, f, indent=2)
+
+            # Atomic move
+            temp_file.replace(progress_file)
+
         except Exception as e:
             logger.warning(f"Failed to save progress: {e}")
+            # Clean up temp file if it exists
+            temp_file = progress_file.with_suffix(progress_file.suffix + ".tmp")
+            if temp_file.exists():
+                try:
+                    temp_file.unlink()
+                except OSError:
+                    pass
 
     def export_recent_activities(
         self,
@@ -556,32 +719,65 @@ def main(
     3. Install dependencies: pip install requests gpxpy click
     """
 
-    # Check if all credentials are provided
+    # Validate CLI arguments
+    validation_errors = []
+
+    # Check credentials
     if not all([client_id, client_secret, refresh_token]):
-        click.echo("⚠ Missing Strava API credentials!", err=True)
-        click.echo("\nOptions to provide credentials:")
-        click.echo("1. Environment variables:")
-        click.echo("   export STRAVA_CLIENT_ID='your_client_id'")
-        click.echo("   export STRAVA_CLIENT_SECRET='your_client_secret'")
-        click.echo("   export STRAVA_REFRESH_TOKEN='your_refresh_token'")
-        click.echo("\n2. Command line options:")
+        validation_errors.append("Missing Strava API credentials")
+
+    # Validate count parameter
+    if count <= 0:
+        validation_errors.append(f"Count must be positive, got: {count}")
+    if count > 10000:  # Reasonable upper limit
+        validation_errors.append(f"Count too large (max 10000), got: {count}")
+
+    # Validate delay parameter
+    if delay < 0:
+        validation_errors.append(f"Delay must be non-negative, got: {delay}")
+    if delay > 60:  # Reasonable upper limit
         click.echo(
-            "   python strava-export.py --client-id ID --client-secret SECRET --refresh-token TOKEN"
+            f"⚠ Warning: Large delay value ({delay}s) may slow down exports significantly"
         )
-        click.echo("\nTo get credentials:")
-        click.echo("1. Go to https://www.strava.com/settings/api")
-        click.echo("2. Create a new application")
-        click.echo("3. Follow OAuth flow to get refresh token")
+
+    # Validate output directory
+    if not output_dir or not isinstance(output_dir, str):
+        validation_errors.append("Output directory must be a valid string")
+
+    if validation_errors:
+        click.echo("⚠ Validation errors found:", err=True)
+        for error in validation_errors:
+            click.echo(f"  - {error}", err=True)
+
+        if not all([client_id, client_secret, refresh_token]):
+            click.echo("\nOptions to provide credentials:")
+            click.echo("1. Environment variables:")
+            click.echo("   export STRAVA_CLIENT_ID='your_client_id'")
+            click.echo("   export STRAVA_CLIENT_SECRET='your_client_secret'")
+            click.echo("   export STRAVA_REFRESH_TOKEN='your_refresh_token'")
+            click.echo("\n2. Command line options:")
+            click.echo(
+                "   python strava-export.py --client-id ID --client-secret SECRET --refresh-token TOKEN"
+            )
+            click.echo("\nTo get credentials:")
+            click.echo("1. Go to https://www.strava.com/settings/api")
+            click.echo("2. Create a new application")
+            click.echo("3. Follow OAuth flow to get refresh token")
+
         raise click.Abort()
 
-    # Create exporter and run
-    exporter = StravaExporter(client_id, client_secret, refresh_token, delay=delay)
-    exporter.export_recent_activities(
-        count=count,
-        output_dir=output_dir,
-        organize_by_type=organize_by_type,
-        resume=resume,
-    )
+    # Create exporter and run with validated parameters
+    try:
+        exporter = StravaExporter(client_id, client_secret, refresh_token, delay=delay)
+        exporter.export_recent_activities(
+            count=count,
+            output_dir=output_dir,
+            organize_by_type=organize_by_type,
+            resume=resume,
+        )
+    except Exception as e:
+        logger.error(f"Export failed: {e}")
+        raise click.Abort()
 
 
 if __name__ == "__main__":
