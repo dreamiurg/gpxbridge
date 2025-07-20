@@ -130,7 +130,8 @@ class StravaExporter:
             
             # Add timestamp
             if i < len(time_data):
-                point.time = start_time.replace(second=start_time.second + time_data[i])
+                from datetime import timedelta
+                point.time = start_time + timedelta(seconds=time_data[i])
             
             # Add elevation
             if i < len(altitude_data):
@@ -150,8 +151,10 @@ class StravaExporter:
         """Export a single activity to GPX file"""
         activity_id = activity["id"]
         activity_name = activity.get("name", f"Activity {activity_id}")
+        activity_type = activity.get("type", "Unknown")
+        start_date = datetime.fromisoformat(activity["start_date_local"].replace("Z", "+00:00"))
         
-        click.echo(f"  Processing: {activity_name}")
+        click.echo(f"  Processing: {start_date.strftime('%Y-%m-%d')} | {activity_type} | {activity_name}")
         
         # Get activity streams
         streams = self.get_activity_streams(activity_id)
@@ -167,9 +170,10 @@ class StravaExporter:
         os.makedirs(output_dir, exist_ok=True)
         
         # Generate filename
-        start_date = datetime.fromisoformat(activity["start_date_local"].replace("Z", "+00:00"))
-        safe_name = "".join(c for c in activity_name if c.isalnum() or c in (' ', '-', '_')).strip()[:50]
-        filename = f"{start_date.strftime('%Y%m%d_%H%M')}_{safe_name}.gpx"
+        safe_name = "".join(c for c in activity_name if c.isalnum() or c in (' ', '-', '_')).strip()[:30]
+        safe_name = safe_name.replace(' ', '-')
+        safe_type = "".join(c for c in activity_type if c.isalnum() or c in ('-', '_'))
+        filename = f"{start_date.strftime('%Y%m%d')}_{safe_type}_{safe_name}_{activity_id}.gpx"
         filepath = os.path.join(output_dir, filename)
         
         # Write GPX file
