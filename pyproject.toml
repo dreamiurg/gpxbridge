@@ -1,7 +1,7 @@
 [project]
 name = "gaia"
 version = "0.1.0"
-description = "Add your description here"
+description = "Multi-service GPS data export tool - export from Strava, Gaia GPS, etc."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -17,3 +17,6 @@ dependencies = [
     "python-slugify>=8.0.4",
     "tenacity>=9.0.0",
 ]
+
+[project.scripts]
+gaia = "src.cli:cli"
