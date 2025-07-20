@@ -29,14 +29,18 @@ from datetime import datetime
 from typing import List, Dict, Optional
 import gpxpy
 import gpxpy.gpx
+import time
+import random
 
 class StravaExporter:
-    def __init__(self, client_id: str, client_secret: str, refresh_token: str):
+    def __init__(self, client_id: str, client_secret: str, refresh_token: str, delay: float = 1.0):
         self.client_id = client_id
         self.client_secret = client_secret
         self.refresh_token = refresh_token
         self.access_token = None
         self.base_url = "https://www.strava.com/api/v3"
+        self.delay = delay  # Delay between requests in seconds
+        self.rate_limit_info = {"15min_usage": 0, "15min_limit": 100, "daily_usage": 0, "daily_limit": 1000}
         
     def get_access_token(self) -> bool:
         """Exchange refresh token for access token"""
@@ -63,6 +67,88 @@ class StravaExporter:
         """Get authorization headers for API requests"""
         return {"Authorization": f"Bearer {self.access_token}"}
     
+    def update_rate_limit_info(self, response: requests.Response):
+        """Update rate limit tracking from response headers"""
+        usage_header = response.headers.get('X-RateLimit-Usage')
+        limit_header = response.headers.get('X-RateLimit-Limit')
+        
+        if usage_header:
+            # Format: "15min_usage,daily_usage"
+            parts = usage_header.split(',')
+            if len(parts) >= 2:
+                self.rate_limit_info["15min_usage"] = int(parts[0])
+                self.rate_limit_info["daily_usage"] = int(parts[1])
+        
+        if limit_header:
+            # Format: "15min_limit,daily_limit" 
+            parts = limit_header.split(',')
+            if len(parts) >= 2:
+                self.rate_limit_info["15min_limit"] = int(parts[0])
+                self.rate_limit_info["daily_limit"] = int(parts[1])
+    
+    def check_rate_limit(self):
+        """Check if we're approaching rate limits and warn user"""
+        fifteen_min_pct = (self.rate_limit_info["15min_usage"] / self.rate_limit_info["15min_limit"]) * 100
+        daily_pct = (self.rate_limit_info["daily_usage"] / self.rate_limit_info["daily_limit"]) * 100
+        
+        if fifteen_min_pct > 80:
+            click.echo(f"⚠ Warning: Using {fifteen_min_pct:.1f}% of 15-minute rate limit")
+        if daily_pct > 80:
+            click.echo(f"⚠ Warning: Using {daily_pct:.1f}% of daily rate limit")
+    
+    def handle_rate_limit_error(self, attempt: int, max_retries: int = 3) -> bool:
+        """Handle 429 rate limit errors with exponential backoff"""
+        if attempt >= max_retries:
+            click.echo(f"✗ Max retries ({max_retries}) reached for rate limit", err=True)
+            return False
+        
+        # Exponential backoff: 15min + jitter for first retry, then 30min, 60min
+        base_delay = 15 * 60 * (2 ** attempt)  # 15min, 30min, 60min
+        jitter = random.uniform(0, 60)  # Add up to 1 minute jitter
+        total_delay = base_delay + jitter
+        
+        minutes = total_delay / 60
+        click.echo(f"⏳ Rate limit hit. Waiting {minutes:.1f} minutes before retry {attempt + 1}/{max_retries}...")
+        time.sleep(total_delay)
+        return True
+    
+    def make_api_request(self, url: str, params: Dict = None, max_retries: int = 3) -> Optional[requests.Response]:
+        """Make API request with rate limiting and retry logic"""
+        for attempt in range(max_retries + 1):
+            try:
+                # Add delay between requests (except first request)
+                if attempt > 0 or hasattr(self, '_request_count'):
+                    time.sleep(self.delay)
+                
+                response = requests.get(url, headers=self.get_headers(), params=params or {})
+                
+                # Update rate limit tracking
+                self.update_rate_limit_info(response)
+                
+                # Track request count for delay logic
+                self._request_count = getattr(self, '_request_count', 0) + 1
+                
+                if response.status_code == 429:
+                    # Rate limit hit
+                    if not self.handle_rate_limit_error(attempt, max_retries):
+                        return None
+                    continue
+                
+                response.raise_for_status()
+                
+                # Check if we're approaching limits
+                self.check_rate_limit()
+                
+                return response
+                
+            except requests.exceptions.RequestException as e:
+                if attempt < max_retries and "429" in str(e):
+                    continue
+                click.echo(f"✗ API request failed: {e}", err=True)
+                return None
+        
+        return None
+    
     def get_recent_activities(self, count: int = 30) -> List[Dict]:
         """Fetch recent activities from Strava with pagination support"""
         activities = []
@@ -78,12 +164,12 @@ class StravaExporter:
                 
                 click.echo(f"  Requesting page {page} with {current_per_page} activities...")
                 
-                response = requests.get(
+                response = self.make_api_request(
                     f"{self.base_url}/athlete/activities",
-                    headers=self.get_headers(),
                     params={"per_page": current_per_page, "page": page}
                 )
-                response.raise_for_status()
+                if not response:
+                    return activities
                 page_activities = response.json()
                 
                 if not page_activities:
@@ -112,20 +198,16 @@ class StravaExporter:
     
     def get_activity_streams(self, activity_id: int) -> Optional[Dict]:
         """Get activity stream data (coordinates, time, etc.)"""
-        try:
-            response = requests.get(
-                f"{self.base_url}/activities/{activity_id}/streams",
-                headers=self.get_headers(),
-                params={
-                    "keys": "latlng,time,altitude,distance,heartrate,cadence,watts",
-                    "key_by_type": "true"
-                }
-            )
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            click.echo(f"✗ Failed to get streams for activity {activity_id}: {e}", err=True)
+        response = self.make_api_request(
+            f"{self.base_url}/activities/{activity_id}/streams",
+            params={
+                "keys": "latlng,time,altitude,distance,heartrate,cadence,watts",
+                "key_by_type": "true"
+            }
+        )
+        if not response:
             return None
+        return response.json()
     
     def create_gpx_from_streams(self, activity: Dict, streams: Dict) -> Optional[gpxpy.gpx.GPX]:
         """Convert Strava activity streams to GPX format"""
@@ -231,10 +313,37 @@ class StravaExporter:
             click.echo(f"  ✗ Failed to save {filepath}: {e}", err=True)
             return False
     
-    def export_recent_activities(self, count: int = 10, output_dir: str = "gpx_exports", organize_by_type: bool = False):
-        """Export recent activities to GPX files"""
+    def load_progress(self, progress_file: str) -> Dict:
+        """Load progress from file to resume interrupted exports"""
+        if os.path.exists(progress_file):
+            try:
+                with open(progress_file, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        return {"exported_activities": [], "last_activity_index": 0}
+    
+    def save_progress(self, progress_file: str, progress: Dict):
+        """Save export progress to file"""
+        try:
+            with open(progress_file, 'w') as f:
+                json.dump(progress, f, indent=2)
+        except Exception as e:
+            click.echo(f"⚠ Failed to save progress: {e}", err=True)
+    
+    def export_recent_activities(self, count: int = 10, output_dir: str = "gpx_exports", organize_by_type: bool = False, resume: bool = False):
+        """Export recent activities to GPX files with progress tracking"""
         if not self.get_access_token():
             return
+        
+        # Progress tracking
+        progress_file = os.path.join(output_dir, ".strava_export_progress.json")
+        progress = {"exported_activities": [], "last_activity_index": 0}
+        
+        if resume:
+            progress = self.load_progress(progress_file)
+            if progress["exported_activities"]:
+                click.echo(f"📄 Resuming export from activity {progress['last_activity_index'] + 1}")
         
         click.echo(f"Fetching {count} recent activities...")
         activities = self.get_recent_activities(count)
@@ -243,16 +352,51 @@ class StravaExporter:
             click.echo("No activities found")
             return
         
-        click.echo(f"\nExporting {len(activities)} activities to GPX...")
-        success_count = 0
+        # Filter out already exported activities if resuming
+        start_index = progress["last_activity_index"] if resume else 0
+        remaining_activities = activities[start_index:]
         
-        for activity in activities:
+        if not remaining_activities:
+            click.echo("✓ All activities already exported")
+            return
+        
+        click.echo(f"\nExporting {len(remaining_activities)} activities to GPX...")
+        click.echo(f"Rate limiting: {self.delay}s delay between requests")
+        
+        success_count = len(progress["exported_activities"])
+        total_activities = len(activities)
+        
+        for i, activity in enumerate(remaining_activities, start=start_index):
+            activity_num = i + 1
+            click.echo(f"\n[{activity_num}/{total_activities}] Processing activity {activity['id']}...")
+            
             if self.export_activity_to_gpx(activity, output_dir, organize_by_type):
                 success_count += 1
+                progress["exported_activities"].append(activity['id'])
+                progress["last_activity_index"] = i
+                
+                # Save progress every 5 activities
+                if len(progress["exported_activities"]) % 5 == 0:
+                    self.save_progress(progress_file, progress)
+            
+            # Show rate limit status periodically
+            if activity_num % 10 == 0:
+                fifteen_min_pct = (self.rate_limit_info["15min_usage"] / self.rate_limit_info["15min_limit"]) * 100
+                daily_pct = (self.rate_limit_info["daily_usage"] / self.rate_limit_info["daily_limit"]) * 100
+                click.echo(f"📊 Rate limit usage: {fifteen_min_pct:.1f}% (15min), {daily_pct:.1f}% (daily)")
         
-        click.echo(f"\n✓ Successfully exported {success_count}/{len(activities)} activities")
+        # Clean up progress file on successful completion
+        if success_count == total_activities and os.path.exists(progress_file):
+            os.remove(progress_file)
+        else:
+            self.save_progress(progress_file, progress)
+        
+        click.echo(f"\n✓ Successfully exported {success_count}/{total_activities} activities")
         if success_count > 0:
             click.echo(f"GPX files saved in: {os.path.abspath(output_dir)}")
+        
+        if success_count < total_activities:
+            click.echo(f"💡 To resume: add --resume flag to continue from where you left off")
 
 @click.command()
 @click.option("--client-id", 
@@ -274,7 +418,14 @@ class StravaExporter:
 @click.option("--organize-by-type", 
               is_flag=True,
               help="Create subdirectories for each activity type")
-def main(client_id, client_secret, refresh_token, count, output_dir, organize_by_type):
+@click.option("--delay", 
+              default=1.0,
+              type=float,
+              help="Delay between requests in seconds (default: 1.0)")
+@click.option("--resume", 
+              is_flag=True,
+              help="Resume interrupted export from where it left off")
+def main(client_id, client_secret, refresh_token, count, output_dir, organize_by_type, delay, resume):
     """Export Strava activities as GPX files.
     
     This tool exports recent activities from your Strava account as GPX files.
@@ -304,8 +455,8 @@ def main(client_id, client_secret, refresh_token, count, output_dir, organize_by
         raise click.Abort()
     
     # Create exporter and run
-    exporter = StravaExporter(client_id, client_secret, refresh_token)
-    exporter.export_recent_activities(count=count, output_dir=output_dir, organize_by_type=organize_by_type)
+    exporter = StravaExporter(client_id, client_secret, refresh_token, delay=delay)
+    exporter.export_recent_activities(count=count, output_dir=output_dir, organize_by_type=organize_by_type, resume=resume)
 
 if __name__ == "__main__":
     main()
