@@ -1,7 +1,7 @@
 [project]
-name = "gaia"
+name = "gpxbridge"
 version = "0.1.0"
-description = "Multi-service GPS data export tool - export from Strava, Gaia GPS, etc."
+description = "GPX data bridge tool - export/import GPS tracks between services like Strava, Gaia GPS, etc."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -19,4 +19,10 @@ dependencies = [
 ]
 
 [project.scripts]
-gaia = "src.cli:cli"
+gpxbridge = "src.cli:cli"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.17.0",
+    "pytest>=8.4.1",
+]

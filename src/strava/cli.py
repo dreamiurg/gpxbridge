@@ -98,7 +98,7 @@ def export(
    export STRAVA_REFRESH_TOKEN='your_refresh_token'
 
 2. Command line options:
-   gaia strava export --client-id ID --client-secret SECRET --refresh-token TOKEN
+   gpxbridge strava export --client-id ID --client-secret SECRET --refresh-token TOKEN
 
 To get credentials:
 1. Go to https://www.strava.com/settings/api

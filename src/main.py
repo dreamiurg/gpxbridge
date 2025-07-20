@@ -1,5 +1,5 @@
 """
-Entry point for the Gaia GPS export tool
+Entry point for the GPXBridge GPS data bridge tool
 """
 
 from .cli import cli

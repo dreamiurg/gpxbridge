@@ -11,9 +11,9 @@ from strava.cli import strava
 @click.group()
 @click.version_option(version="0.1.0")
 def cli():
-    """Gaia - Multi-service GPS data export tool
+    """GPXBridge - GPS data bridge tool
 
-    Export GPS data from various services like Strava, Gaia GPS, etc.
+    Bridge GPS data between various services like Strava, Gaia GPS, etc.
     """
     # Configure loguru for better CLI output
     logger.remove()  # Remove default handler
