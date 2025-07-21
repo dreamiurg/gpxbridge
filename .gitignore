@@ -59,3 +59,4 @@ data/
 
 # Progress files
 .strava_export_progress.json
+.hypothesis/

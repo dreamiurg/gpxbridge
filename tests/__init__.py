@@ -1,0 +1,3 @@
+"""
+GPXBridge test suite
+"""

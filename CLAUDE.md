@@ -17,7 +17,11 @@ GPXBridge offers a CLI to bridge GPS data between various services (currently St
 - `uv run ruff check` - Run linting (ruff is included as a project dependency)
 - `uv run ruff format` - Format code
 - `uv run mypy src/` - Type checking
-- `uv run pytest` - Run tests
+- `uv run pytest` - Run all tests
+- `uv run pytest --cov` - Run tests with coverage report
+- `uv run pytest -m "not slow"` - Run tests excluding slow tests
+- `uv run pytest tests/test_common/` - Run specific test module
+- `uv run pytest -k "test_coordinate"` - Run tests matching pattern
 
 ### Application Usage
 - `uv run gpxbridge --help` - Show available commands
@@ -78,6 +82,9 @@ This project uses a Git Flow approach for managing changes:
 - Claude should NOT merge to master unless explicitly instructed
 - Feature branches should be descriptively named (e.g., `feature/add-garmin-support`)
 - Always clean up feature branches after successful merge
+
+### Pre-Commit Checks
+- Run pre-commit hooks before you attempt to commit changes
 
 ## Credential Management
 
