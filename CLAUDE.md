@@ -60,6 +60,25 @@ GPXBridge offers a CLI to bridge GPS data between various services (currently St
 
 - **File Organization**: Activities can be organized by type into subdirectories using the `--organize-by-type` flag.
 
+## Git Workflow
+
+This project uses a Git Flow approach for managing changes:
+
+- **master** - Production-ready code only
+- **feature/*** - Feature development branches
+
+### Workflow Process:
+1. **User explicitly starts new features** - The user will tell Claude when to create a new feature branch
+2. **Feature development** - Work happens on `feature/feature-name` branches
+3. **User explicitly releases features** - The user will tell Claude when to merge completed features to master
+4. **No develop branch** - Features merge directly to master when ready for production
+
+### Branch Management:
+- Claude should NOT create feature branches unless explicitly instructed
+- Claude should NOT merge to master unless explicitly instructed
+- Feature branches should be descriptively named (e.g., `feature/add-garmin-support`)
+- Always clean up feature branches after successful merge
+
 ## Credential Management
 
 Strava API credentials are provided via environment variables:
