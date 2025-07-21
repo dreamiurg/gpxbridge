@@ -5,7 +5,7 @@ Main CLI orchestrator combining all GPS service commands
 import click
 from loguru import logger
 
-from strava.cli import strava
+from src.strava.cli import strava
 
 
 @click.group()

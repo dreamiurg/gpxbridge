@@ -23,6 +23,12 @@ GPXBridge offers a CLI to bridge GPS data between various services (currently St
 - `uv run pytest tests/test_common/` - Run specific test module
 - `uv run pytest -k "test_coordinate"` - Run tests matching pattern
 
+### Initial Setup
+Before running the application, install it in development mode:
+```bash
+uv pip install -e .
+```
+
 ### Application Usage
 - `uv run gpxbridge --help` - Show available commands
 - `uv run gpxbridge strava export --help` - Show Strava export options
