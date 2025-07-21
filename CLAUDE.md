@@ -83,8 +83,8 @@ This project uses a Git Flow approach for managing changes:
 - Feature branches should be descriptively named (e.g., `feature/add-garmin-support`)
 - Always clean up feature branches after successful merge
 
-### Pre-Commit Checks
-- Run pre-commit hooks before you attempt to commit changes
+### Before Committing changes
+- Remember to make sure that both unit tests and pre-commit hooks pass before you commit changes
 
 ## Credential Management
 
