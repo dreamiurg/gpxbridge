@@ -38,8 +38,18 @@ class GPXUtils:
     def validate_gpx_string(gpx_string: str) -> bool:
         """Validate that a string contains valid GPX XML"""
         try:
-            gpxpy.parse(gpx_string)
-            return True
+            if not gpx_string or not gpx_string.strip():
+                return False
+
+            # Check if the string actually contains a GPX root element
+            if "<gpx" not in gpx_string.lower():
+                return False
+
+            # Parse the GPX string
+            gpx = gpxpy.parse(gpx_string)
+
+            # Ensure it's actually a GPX object (not just any XML)
+            return isinstance(gpx, gpxpy.gpx.GPX)
         except Exception:
             return False
 
@@ -54,14 +64,18 @@ class GPXUtils:
         }
 
         for track in gpx.tracks:
-            track_stats = track.get_moving_data()
-            if track_stats:
-                stats["total_distance"] += track_stats.moving_distance or 0
-
-            uphill, _ = track.get_uphill_downhill()
-            stats["total_elevation_gain"] += uphill or 0
-
+            # Count points first
             for segment in track.segments:
                 stats["total_points"] += len(segment.points)
+
+            # Only calculate stats if track has points
+            if any(len(segment.points) > 0 for segment in track.segments):
+                # Get track length (distance)
+                track_length = track.length_3d() or track.length_2d() or 0
+                stats["total_distance"] += track_length
+
+                # Get elevation gain
+                uphill, _ = track.get_uphill_downhill()
+                stats["total_elevation_gain"] += uphill or 0
 
         return stats

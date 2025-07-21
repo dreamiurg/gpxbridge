@@ -5,24 +5,22 @@ Strava-specific Pydantic models
 from typing import Optional
 import arrow
 from pydantic import BaseModel, Field, field_validator, model_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class ClientSettings(BaseSettings):
     """Strava API configuration using environment variables"""
 
-    client_id: str = Field(
-        ..., env="STRAVA_CLIENT_ID", description="Strava API client ID", min_length=1
-    )
+    model_config = SettingsConfigDict(env_prefix="STRAVA_")
+
+    client_id: str = Field(..., description="Strava API client ID", min_length=1)
     client_secret: str = Field(
         ...,
-        env="STRAVA_CLIENT_SECRET",
         description="Strava API client secret",
         min_length=1,
     )
     refresh_token: str = Field(
         ...,
-        env="STRAVA_REFRESH_TOKEN",
         description="Strava refresh token",
         min_length=1,
     )
@@ -49,7 +47,14 @@ class StravaActivity(BaseModel):
     @classmethod
     def validate_date_format(cls, v):
         """Validate date string can be parsed by Arrow"""
+        if not v or not v.strip():
+            raise ValueError("Invalid date format: empty date")
+
         try:
+            # Arrow can be too permissive, so check basic format requirements
+            if len(v.strip()) < 10:  # Minimum for YYYY-MM-DD
+                raise ValueError("Invalid date format: too short")
+
             arrow.get(v)
             return v
         except (arrow.ParserError, ValueError) as e:
@@ -67,20 +72,18 @@ class StravaActivity(BaseModel):
 class RateLimitInfo(BaseModel):
     """Rate limit tracking model with validation"""
 
+    model_config = {"populate_by_name": True}
+
     fifteen_min_usage: int = Field(default=0, ge=0, alias="15min_usage")
     fifteen_min_limit: int = Field(default=100, gt=0, alias="15min_limit")
-    daily_usage: int = Field(default=0, ge=0, alias="daily_usage")
-    daily_limit: int = Field(default=1000, gt=0, alias="daily_limit")
+    daily_usage: int = Field(default=0, ge=0)
+    daily_limit: int = Field(default=1000, gt=0)
 
-    @model_validator(mode="before")
-    @classmethod
-    def validate_limits(cls, values):
+    @model_validator(mode="after")
+    def validate_limits(self):
         """Ensure usage doesn't exceed limits"""
-        if isinstance(values, dict):
-            if values.get("fifteen_min_usage", 0) > values.get(
-                "fifteen_min_limit", 100
-            ):
-                values["fifteen_min_usage"] = values.get("fifteen_min_limit", 100)
-            if values.get("daily_usage", 0) > values.get("daily_limit", 1000):
-                values["daily_usage"] = values.get("daily_limit", 1000)
-        return values
+        if self.fifteen_min_usage > self.fifteen_min_limit:
+            self.fifteen_min_usage = self.fifteen_min_limit
+        if self.daily_usage > self.daily_limit:
+            self.daily_usage = self.daily_limit
+        return self

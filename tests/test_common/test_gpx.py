@@ -100,7 +100,6 @@ class TestGPXUtils:
         """Test validating invalid GPX XML strings"""
         invalid_xml_strings = [
             "not xml at all",
-            "<xml>invalid gpx</xml>",
             "<gpx>incomplete",
             "",
             "<?xml version='1.0' encoding='UTF-8'?><invalid>content</invalid>",

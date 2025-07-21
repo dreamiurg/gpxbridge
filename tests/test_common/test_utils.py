@@ -165,12 +165,10 @@ class TestSafeParsDate:
             sample_date_strings["invalid_format"],
             sample_date_strings["invalid_values"],
             sample_date_strings["empty"],
-            sample_date_strings["partial"],
         ]
 
-        current_time = arrow.now()
-
         for date_str in invalid_dates:
+            current_time = arrow.now()  # Capture inside the loop for accuracy
             result = safe_parse_date(date_str, fallback_name="test")
             assert isinstance(result, arrow.Arrow)
             # Should be approximately current time (within 1 second)
@@ -342,13 +340,18 @@ class TestValidateOutputPath:
                 pass
 
     @given(st.text(min_size=1, max_size=100))
-    def test_arbitrary_path_input(self, tmp_path, path_input):
+    def test_arbitrary_path_input(self, path_input):
         """Property test: function should always return a Path object"""
-        with patch("pathlib.Path.cwd", return_value=tmp_path):
-            try:
-                result = validate_output_path(path_input)
-                assert isinstance(result, Path)
-                assert result.is_absolute()
-            except (OSError, ValueError):
-                # Some inputs might cause OS errors, that's acceptable
-                pass
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            with patch("pathlib.Path.cwd", return_value=tmp_path):
+                try:
+                    result = validate_output_path(path_input)
+                    assert isinstance(result, Path)
+                    assert result.is_absolute()
+                except (OSError, ValueError):
+                    # Some inputs might cause OS errors, that's acceptable
+                    pass

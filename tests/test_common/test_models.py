@@ -28,25 +28,21 @@ class TestCoordinate:
         """Test latitude boundary validation"""
         with pytest.raises(ValidationError) as exc_info:
             Coordinate(latitude=91.0, longitude=0.0)
-        assert "ensure this value is less than or equal to 90" in str(exc_info.value)
+        assert "Input should be less than or equal to 90" in str(exc_info.value)
 
         with pytest.raises(ValidationError) as exc_info:
             Coordinate(latitude=-91.0, longitude=0.0)
-        assert "ensure this value is greater than or equal to -90" in str(
-            exc_info.value
-        )
+        assert "Input should be greater than or equal to -90" in str(exc_info.value)
 
     def test_invalid_longitude_bounds(self):
         """Test longitude boundary validation"""
         with pytest.raises(ValidationError) as exc_info:
             Coordinate(latitude=0.0, longitude=181.0)
-        assert "ensure this value is less than or equal to 180" in str(exc_info.value)
+        assert "Input should be less than or equal to 180" in str(exc_info.value)
 
         with pytest.raises(ValidationError) as exc_info:
             Coordinate(latitude=0.0, longitude=-181.0)
-        assert "ensure this value is greater than or equal to -180" in str(
-            exc_info.value
-        )
+        assert "Input should be greater than or equal to -180" in str(exc_info.value)
 
     def test_from_tuple_valid(self, sample_coordinate_data):
         """Test creating coordinate from valid tuple"""
@@ -119,7 +115,7 @@ class TestGPSPoint:
         # Negative time offset
         with pytest.raises(ValidationError) as exc_info:
             GPSPoint(coordinate=coord, time_offset_seconds=-1.0)
-        assert "ensure this value is greater than or equal to 0" in str(exc_info.value)
+        assert "Input should be greater than or equal to 0" in str(exc_info.value)
 
     def test_time_offset_too_large(self):
         """Test time offset that's too large (> 7 days)"""
@@ -147,14 +143,12 @@ class TestGPSPoint:
         # Too low elevation
         with pytest.raises(ValidationError) as exc_info:
             GPSPoint(coordinate=coord, elevation_meters=-1001.0)
-        assert "ensure this value is greater than or equal to -1000" in str(
-            exc_info.value
-        )
+        assert "Input should be greater than or equal to -1000" in str(exc_info.value)
 
         # Too high elevation
         with pytest.raises(ValidationError) as exc_info:
             GPSPoint(coordinate=coord, elevation_meters=10001.0)
-        assert "ensure this value is less than or equal to 10000" in str(exc_info.value)
+        assert "Input should be less than or equal to 10000" in str(exc_info.value)
 
     def test_elevation_boundary_values(self):
         """Test elevation at boundary values"""
@@ -188,12 +182,12 @@ class TestExportConfig:
         # Count too low
         with pytest.raises(ValidationError) as exc_info:
             ExportConfig(**{**base_config, "count": 0})
-        assert "ensure this value is greater than 0" in str(exc_info.value)
+        assert "Input should be greater than 0" in str(exc_info.value)
 
         # Count too high
         with pytest.raises(ValidationError) as exc_info:
             ExportConfig(**{**base_config, "count": 10001})
-        assert "ensure this value is less than or equal to 10000" in str(exc_info.value)
+        assert "Input should be less than or equal to 10000" in str(exc_info.value)
 
     def test_invalid_delay_bounds(self):
         """Test delay_seconds boundary validation"""
@@ -202,12 +196,12 @@ class TestExportConfig:
         # Negative delay
         with pytest.raises(ValidationError) as exc_info:
             ExportConfig(**{**base_config, "delay_seconds": -1.0})
-        assert "ensure this value is greater than or equal to 0" in str(exc_info.value)
+        assert "Input should be greater than or equal to 0" in str(exc_info.value)
 
         # Delay too high
         with pytest.raises(ValidationError) as exc_info:
             ExportConfig(**{**base_config, "delay_seconds": 61.0})
-        assert "ensure this value is less than or equal to 60" in str(exc_info.value)
+        assert "Input should be less than or equal to 60" in str(exc_info.value)
 
     def test_empty_output_dir(self):
         """Test empty output directory validation"""
@@ -215,7 +209,7 @@ class TestExportConfig:
 
         with pytest.raises(ValidationError) as exc_info:
             ExportConfig(**base_config)
-        assert "Output directory cannot be empty" in str(exc_info.value)
+        assert "String should have at least 1 character" in str(exc_info.value)
 
     def test_whitespace_only_output_dir(self):
         """Test whitespace-only output directory"""
@@ -281,20 +275,20 @@ class TestProgressData:
     def test_non_integer_activity_ids(self):
         """Test non-integer activity IDs"""
         with pytest.raises(ValidationError) as exc_info:
-            ProgressData(exported_activities=[1, 2, "3", 4])
-        assert "Invalid activity ID" in str(exc_info.value)
+            ProgressData(exported_activities=[1, 2, "invalid", 4])
+        assert "unable to parse string" in str(exc_info.value)
 
     def test_invalid_activity_list_type(self):
         """Test non-list activity IDs"""
         with pytest.raises(ValidationError) as exc_info:
             ProgressData(exported_activities="not_a_list")
-        assert "exported_activities must be a list" in str(exc_info.value)
+        assert "Input should be a valid list" in str(exc_info.value)
 
     def test_negative_last_activity_index(self):
         """Test negative last activity index"""
         with pytest.raises(ValidationError) as exc_info:
             ProgressData(last_activity_index=-1)
-        assert "ensure this value is greater than or equal to 0" in str(exc_info.value)
+        assert "Input should be greater than or equal to 0" in str(exc_info.value)
 
     def test_large_activity_list(self):
         """Test with large activity list"""
