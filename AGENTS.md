@@ -47,10 +47,7 @@ Guidance for Codex (and other code-focused agents) working in this repository.
 - **Activity Organization** – `--organize-by-type` can group exports into per-activity folders.
 
 ## Git Expectations
-- Branching follows a lightweight Git Flow.
-  - `master` stays production-ready.
-  - Feature work happens on `feature/<description>` branches.
-- Do **not** create or merge branches unless the user explicitly asks.
+- Never run `git commit`, `git push`, or any other Git command that mutates history or the working tree unless the user explicitly instructs you to do so.
 - Run linting and tests before committing when possible; report if you must skip.
 
 ## Credentials
@@ -64,4 +61,6 @@ The app validates credentials on startup and provides guidance if they are missi
 ## Agent Checklist
 - Understand the task, clarify uncertainties, and document assumptions in replies.
 - Prefer `uv run …` for tooling. Avoid out-of-band managers unless instructed.
+- Use the `gh` CLI for any GitHub-facing workflows (issues, PRs, releases) unless the user requests a different tool.
+- After code changes, always run the project’s pre-commit hooks and full test suite; address any failures before reporting back unless the user directs otherwise.
 - Keep instructions in this file aligned with Codex behaviour; update them if workflows change.
