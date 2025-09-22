@@ -63,4 +63,5 @@ The app validates credentials on startup and provides guidance if they are missi
 - Prefer `uv run …` for tooling. Avoid out-of-band managers unless instructed.
 - Use the `gh` CLI for any GitHub-facing workflows (issues, PRs, releases) unless the user requests a different tool.
 - After code changes, always run the project’s pre-commit hooks and full test suite; address any failures before reporting back unless the user directs otherwise.
+- Pre-commit hooks run Ruff (lint + format) and `uv run mypy src/`; expect commits to fail if lint or typing regress.
 - Keep instructions in this file aligned with Codex behaviour; update them if workflows change.

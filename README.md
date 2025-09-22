@@ -1,6 +1,6 @@
 # GPXBridge?
 
-GPXBridge is a Python command-line tool that pulls your recent GPS activities from Strava and saves them as GPX files you can archive or import into other services. 
+GPXBridge is a Python command-line tool that pulls your recent GPS activities from Strava and saves them as GPX files you can archive or import into other services.
 
 ## Why GPXBridge?
 

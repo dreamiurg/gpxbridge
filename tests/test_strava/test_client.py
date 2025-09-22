@@ -14,9 +14,7 @@ def _make_response(status_code: int) -> requests.Response:
     response.status_code = status_code
     response._content = b"{}"
     response.url = "https://www.strava.com/api/v3/test"
-    response.request = requests.Request(
-        method="GET", url=response.url
-    ).prepare()
+    response.request = requests.Request(method="GET", url=response.url).prepare()
     return response
 
 
