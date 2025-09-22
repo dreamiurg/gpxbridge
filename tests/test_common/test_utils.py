@@ -90,16 +90,16 @@ class TestValidateCoordinates:
     def test_invalid_coordinates(self, sample_coordinate_data):
         """Test invalid GPS coordinates"""
         for lat, lng in sample_coordinate_data["invalid_coordinates"]:
-            assert (
-                validate_coordinates(lat, lng) is False
-            ), f"Should fail for ({lat}, {lng})"
+            assert validate_coordinates(lat, lng) is False, (
+                f"Should fail for ({lat}, {lng})"
+            )
 
     def test_invalid_types(self, sample_coordinate_data):
         """Test invalid coordinate types"""
         for lat, lng in sample_coordinate_data["invalid_types"]:
-            assert (
-                validate_coordinates(lat, lng) is False
-            ), f"Should fail for ({lat}, {lng})"
+            assert validate_coordinates(lat, lng) is False, (
+                f"Should fail for ({lat}, {lng})"
+            )
 
     def test_boundary_values(self):
         """Test exact boundary values"""

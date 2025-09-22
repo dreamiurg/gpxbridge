@@ -4,7 +4,7 @@ Strava export orchestration and file management
 
 import json
 from pathlib import Path
-from typing import Dict
+from typing import Any, Dict
 from loguru import logger
 
 from ..common.models import ProgressData, ExportConfig
@@ -22,7 +22,7 @@ class StravaExporter:
 
     def export_activity_to_gpx(
         self,
-        activity: Dict,
+        activity: Dict[str, Any],
         output_dir: str = "gpx_exports",
         organize_by_type: bool = False,
     ) -> bool:
@@ -98,7 +98,7 @@ class StravaExporter:
             logger.error(f"Failed to save {filepath}: {e}")
             return False
 
-    def load_progress(self, progress_file: Path) -> Dict:
+    def load_progress(self, progress_file: Path) -> ProgressData:
         """Load progress from file to resume interrupted exports"""
         if progress_file.exists():
             try:
@@ -107,24 +107,21 @@ class StravaExporter:
 
                 # Validate using Pydantic model
                 progress_data = ProgressData(**data)
-                return {
-                    "exported_activities": progress_data.exported_activities,
-                    "last_activity_index": progress_data.last_activity_index,
-                }
+                return progress_data
 
             except (OSError, json.JSONDecodeError, Exception) as e:
                 logger.warning(f"Failed to load progress file: {e}, starting fresh")
 
-        return {"exported_activities": [], "last_activity_index": 0}
+        return ProgressData()
 
-    def save_progress(self, progress_file: Path, progress: Dict):
+    def save_progress(self, progress_file: Path, progress: ProgressData) -> None:
         """Save export progress to file with atomic write"""
         try:
             # Use atomic write by writing to temp file first
             temp_file = progress_file.with_suffix(progress_file.suffix + ".tmp")
 
             with temp_file.open("w") as f:
-                json.dump(progress, f, indent=2)
+                json.dump(progress.model_dump(), f, indent=2)
 
             # Atomic move
             temp_file.replace(progress_file)
@@ -146,13 +143,13 @@ class StravaExporter:
 
         # Progress tracking
         progress_file = Path(config.output_dir) / ".strava_export_progress.json"
-        progress = {"exported_activities": [], "last_activity_index": 0}
+        progress = ProgressData()
 
         if config.resume:
             progress = self.load_progress(progress_file)
-            if progress["exported_activities"]:
+            if progress.exported_activities:
                 logger.info(
-                    f"Resuming export from activity {progress['last_activity_index'] + 1}"
+                    f"Resuming export from activity {progress.last_activity_index + 1}"
                 )
 
         logger.info(f"Fetching {config.count} recent activities...")
@@ -163,7 +160,7 @@ class StravaExporter:
             return
 
         # Filter out already exported activities if resuming
-        start_index = progress["last_activity_index"] if config.resume else 0
+        start_index = progress.last_activity_index if config.resume else 0
         remaining_activities = activities[start_index:]
 
         if not remaining_activities:
@@ -173,24 +170,25 @@ class StravaExporter:
         logger.info(f"Exporting {len(remaining_activities)} activities to GPX...")
         logger.info(f"Rate limiting: {config.delay_seconds}s delay between requests")
 
-        success_count = len(progress["exported_activities"])
+        success_count = len(progress.exported_activities)
         total_activities = len(activities)
 
         for i, activity in enumerate(remaining_activities, start=start_index):
             activity_num = i + 1
+            activity_id = int(activity["id"])
             logger.info(
-                f"[{activity_num}/{total_activities}] Processing activity {activity['id']}..."
+                f"[{activity_num}/{total_activities}] Processing activity {activity_id}..."
             )
 
             if self.export_activity_to_gpx(
                 activity, config.output_dir, config.organize_by_type
             ):
                 success_count += 1
-                progress["exported_activities"].append(activity["id"])
-                progress["last_activity_index"] = i
+                progress.exported_activities.append(activity_id)
+                progress.last_activity_index = i
 
                 # Save progress every 5 activities
-                if len(progress["exported_activities"]) % 5 == 0:
+                if len(progress.exported_activities) % 5 == 0:
                     self.save_progress(progress_file, progress)
 
             # Show rate limit status periodically

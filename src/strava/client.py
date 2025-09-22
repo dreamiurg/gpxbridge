@@ -2,21 +2,17 @@
 Strava API client with authentication and rate limiting
 """
 
-import requests
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, cast
+
+import requests
 from loguru import logger
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception,
-)
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential
 
 from .models import RateLimitInfo
 
 
-def _is_rate_limit_http_error(error: Exception) -> bool:
+def _is_rate_limit_http_error(error: BaseException) -> bool:
     """Return True when the exception represents an HTTP 429 response."""
 
     if not isinstance(error, requests.exceptions.HTTPError):
@@ -35,10 +31,8 @@ def _log_rate_limit_retry(retry_state) -> None:
     sleep_seconds = getattr(getattr(retry_state, "next_action", None), "sleep", 0)
     attempt_number = getattr(retry_state, "attempt_number", 1)
 
-    message = (
-        "Rate limit hit. Waiting {:.0f}s before retry {}/3...".format(
-            sleep_seconds, attempt_number
-        )
+    message = "Rate limit hit. Waiting {:.0f}s before retry {}/3...".format(
+        sleep_seconds, attempt_number
     )
     logger.info(message)
 
@@ -52,7 +46,7 @@ class StravaApiClient:
         self.client_id = client_id
         self.client_secret = client_secret
         self.refresh_token = refresh_token
-        self.access_token = None
+        self.access_token: Optional[str] = None
         self.base_url = "https://www.strava.com/api/v3"
         self.delay = delay  # Delay between requests in seconds
         self.rate_limit_info = RateLimitInfo()
@@ -76,8 +70,8 @@ class StravaApiClient:
                 },
             )
             response.raise_for_status()
-            token_data = response.json()
-            self.access_token = token_data["access_token"]
+            token_data = cast(Dict[str, Any], response.json())
+            self.access_token = str(token_data["access_token"])
             logger.success("Successfully obtained access token")
             return True
         except requests.exceptions.RequestException as e:
@@ -86,15 +80,19 @@ class StravaApiClient:
 
     def get_headers(self) -> Dict[str, str]:
         """Get authorization headers for API requests"""
+        if self.access_token is None:
+            raise RuntimeError(
+                "Access token missing. Call get_access_token() before making requests."
+            )
         return {"Authorization": f"Bearer {self.access_token}"}
 
-    def update_rate_limit_info(self, response: requests.Response):
+    def update_rate_limit_info(self, response: requests.Response) -> None:
         """Update rate limit tracking from response headers"""
         usage_header = response.headers.get("X-RateLimit-Usage")
         limit_header = response.headers.get("X-RateLimit-Limit")
 
         try:
-            update_data = {}
+            update_data: Dict[str, int] = {}
 
             if usage_header:
                 # Format: "15min_usage,daily_usage"
@@ -144,7 +142,7 @@ class StravaApiClient:
         reraise=True,
     )
     def _make_request_with_retry(
-        self, url: str, params: Dict = None
+        self, url: str, params: Optional[Dict[str, Any]] = None
     ) -> requests.Response:
         """Make HTTP request with automatic retry on rate limit errors"""
         logger.debug("GET {} params={} ", url, params or {})
@@ -168,7 +166,7 @@ class StravaApiClient:
         return response
 
     def make_api_request(
-        self, url: str, params: Dict = None
+        self, url: str, params: Optional[Dict[str, Any]] = None
     ) -> Optional[requests.Response]:
         """Make API request with rate limiting and retry logic"""
         try:
@@ -189,8 +187,8 @@ class StravaApiClient:
             return response
 
         except requests.exceptions.HTTPError as e:
-            response = getattr(e, "response", None)
-            status_code = getattr(response, "status_code", None)
+            error_response = getattr(e, "response", None)
+            status_code = getattr(error_response, "status_code", None)
 
             if status_code == 401:
                 logger.error(
@@ -215,9 +213,9 @@ class StravaApiClient:
             logger.error(f"API request failed: {e}")
             return None
 
-    def get_recent_activities(self, count: int = 30) -> List[Dict]:
+    def get_recent_activities(self, count: int = 30) -> List[Dict[str, Any]]:
         """Fetch recent activities from Strava with pagination support"""
-        activities = []
+        activities: List[Dict[str, Any]] = []
         page = 1
         per_page = 200  # Strava API max is 200 per page
 
@@ -240,7 +238,7 @@ class StravaApiClient:
                 )
                 if not response:
                     return activities
-                page_activities = response.json()
+                page_activities = cast(List[Dict[str, Any]], response.json())
 
                 if not page_activities:
                     # No more activities available

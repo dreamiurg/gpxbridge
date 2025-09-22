@@ -37,4 +37,5 @@ dev = [
     "hypothesis>=6.136.1",
     "freezegun>=1.5.3",
     "pytest-mock>=3.14.1",
+    "types-requests>=2.32.4.20250913",
 ]
