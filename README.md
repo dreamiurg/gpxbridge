@@ -22,6 +22,17 @@ GPXBridge needs a Strava API application and an OAuth refresh token in order to 
 4. Save. You will now see your **Client ID** and **Client Secret**.
 
 ### 2. Authorize Yourself and Capture a Refresh Token
+
+Run the built-in helper to guide you through the OAuth dance:
+
+```bash
+uv run gpxbridge strava auth
+```
+
+The command prompts for your client ID/secret (or reads `STRAVA_CLIENT_ID` / `STRAVA_CLIENT_SECRET`), opens Strava's authorization page, and listens on `http://localhost:8721` for the redirect. When you approve the app it prints ready-to-copy exports for `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, and `STRAVA_REFRESH_TOKEN`.
+
+Prefer the manual route? Follow the original flow:
+
 1. Visit this authorization URL in your browser, replacing `YOUR_CLIENT_ID` with the number you just received:
    ```
    https://www.strava.com/oauth/authorize?client_id=YOUR_CLIENT_ID&response_type=code&redirect_uri=http://localhost&approval_prompt=force&scope=activity:read_all

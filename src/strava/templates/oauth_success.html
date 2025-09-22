@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>GPXBridge Authorization Complete</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        margin: 2rem;
+        color: #1f2933;
+        background: #f5f7fa;
+      }
+      .panel {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 2rem;
+        background: white;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(15, 23, 42, 0.1);
+      }
+      pre {
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 1rem;
+        border-radius: 8px;
+        overflow-x: auto;
+        font-size: 0.9rem;
+      }
+      button {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+        padding: 0.6rem 1rem;
+        background: #2563eb;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        font-size: 0.95rem;
+        cursor: pointer;
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      .hint {
+        margin-top: 1.5rem;
+        font-size: 0.95rem;
+        line-height: 1.6;
+      }
+      .secondary {
+        color: #52606d;
+      }
+      .success {
+        font-size: 1.4rem;
+        font-weight: 600;
+        margin-bottom: 1rem;
+      }
+      .athlete {
+        margin-top: 1.5rem;
+        padding: 1.25rem;
+        background: #f8fafc;
+        border-radius: 8px;
+        border: 1px solid #d2d6dc;
+      }
+      .athlete h2 {
+        margin-top: 0;
+        font-size: 1rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .athlete dl {
+        margin: 0;
+        display: grid;
+        grid-template-columns: max-content auto;
+        gap: 0.5rem 1rem;
+        font-size: 0.95rem;
+      }
+      .athlete dt {
+        font-weight: 600;
+        color: #364152;
+      }
+      .athlete dd {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="panel">
+      <div class="success">Authorization complete!</div>
+      <p>
+        Hop back to your terminal. We've printed these exports there too, but you
+        can copy them from here if you prefer:
+      </p>
+      <pre id="env-block">{{ env_exports | join('\n') }}</pre>
+      <button id="copy-btn" type="button">Copy exports</button>
+      <div class="hint">
+        When the exports are set, run:
+        <pre id="export-command">{{ export_command }}</pre>
+      </div>
+      <div class="hint secondary">
+        Access token expires at <strong>{{ expires_at }}</strong> (UTC).
+      </div>
+      {% if athlete %}
+      <div class="athlete">
+        <h2>Authorized athlete</h2>
+        <dl>
+          {% if athlete.get('id') %}
+          <dt>ID</dt>
+          <dd>{{ athlete.get('id') }}</dd>
+          {% endif %}
+          {% if athlete.get('firstname') or athlete.get('lastname') %}
+          <dt>Name</dt>
+          <dd>{{ athlete.get('firstname', '') }} {{ athlete.get('lastname', '') }}</dd>
+          {% endif %}
+          {% if athlete.get('city') or athlete.get('country') %}
+          <dt>Location</dt>
+          <dd>
+            {{ athlete.get('city', 'Unknown') }}{% if athlete.get('city') and athlete.get('country') %}, {% endif %}{{ athlete.get('country', '') }}
+          </dd>
+          {% endif %}
+        </dl>
+      </div>
+      {% endif %}
+    </div>
+    <script>
+      const button = document.getElementById('copy-btn');
+      button?.addEventListener('click', async () => {
+        const text = document.getElementById('env-block')?.innerText;
+        if (!text) return;
+        try {
+          await navigator.clipboard.writeText(text);
+          button.textContent = 'Copied!';
+          setTimeout(() => { button.textContent = 'Copy exports'; }, 2500);
+        } catch (error) {
+          button.textContent = 'Copy failed';
+          setTimeout(() => { button.textContent = 'Copy exports'; }, 2500);
+        }
+      });
+    </script>
+  </body>
+</html>

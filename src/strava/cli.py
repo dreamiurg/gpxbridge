@@ -1,14 +1,17 @@
-"""
-Strava CLI commands
-"""
+"""Strava CLI commands."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
 
 import click
 from loguru import logger
 
 from ..common.models import ExportConfig
-from .models import ClientSettings
 from .client import StravaApiClient
 from .exporter import StravaExporter
+from .models import ClientSettings
+from .oauth import DEFAULT_SCOPE, OAuthError, run_oauth_flow
 
 
 @click.group()
@@ -140,3 +143,92 @@ To get credentials:
     except Exception as e:
         logger.error(f"Export failed: {e}")
         raise click.Abort()
+
+
+@strava.command()
+@click.option(
+    "--client-id",
+    envvar="STRAVA_CLIENT_ID",
+    prompt="Strava client ID",
+    show_envvar=True,
+    help="Strava application client ID (set STRAVA_CLIENT_ID to skip prompt)",
+)
+@click.option(
+    "--client-secret",
+    envvar="STRAVA_CLIENT_SECRET",
+    prompt=True,
+    hide_input=True,
+    confirmation_prompt=False,
+    show_envvar=True,
+    help="Strava application client secret (set STRAVA_CLIENT_SECRET to skip prompt)",
+)
+@click.option(
+    "--scope",
+    default=DEFAULT_SCOPE,
+    show_default=True,
+    help="OAuth scopes to request during authorization",
+)
+@click.option(
+    "--redirect-port",
+    default=8721,
+    show_default=True,
+    type=int,
+    help="Local port to capture the OAuth callback",
+)
+@click.option(
+    "--timeout",
+    default=180,
+    show_default=True,
+    type=int,
+    help="Seconds to wait for the browser redirect",
+)
+@click.option(
+    "--no-browser",
+    is_flag=True,
+    help="Do not try to open the authorization URL in a browser automatically",
+)
+def auth(
+    client_id: str,
+    client_secret: str,
+    scope: str,
+    redirect_port: int,
+    timeout: int,
+    no_browser: bool,
+) -> None:
+    """Guide you through Strava OAuth and print the resulting tokens."""
+
+    try:
+        tokens = run_oauth_flow(
+            client_id,
+            client_secret,
+            scope=scope,
+            port=redirect_port,
+            open_browser=not no_browser,
+            timeout=timeout,
+        )
+    except KeyboardInterrupt as exc:  # noqa: PERF203 - user interruption
+        raise click.ClickException("Authorization cancelled by user") from exc
+    except OAuthError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    expires_at = datetime.fromtimestamp(tokens.expires_at, tz=timezone.utc)
+    click.echo()
+    click.echo("Authorization successful! Save these environment variables:")
+    click.echo(f"export STRAVA_CLIENT_ID=\"{client_id}\"")
+    click.echo(f"export STRAVA_CLIENT_SECRET=\"{client_secret}\"")
+    click.echo(f"export STRAVA_REFRESH_TOKEN=\"{tokens.refresh_token}\"")
+    click.echo()
+    click.echo("Access token details (useful for quick testing):")
+    click.echo(f"  token_type: {tokens.token_type}")
+    click.echo(f"  access_token (expires {expires_at.isoformat()}): {tokens.access_token}")
+    click.echo(f"  scope: {scope}")
+
+    athlete = tokens.athlete or {}
+    if athlete:
+        athlete_name = athlete.get("firstname", "") + " " + athlete.get("lastname", "")
+        click.echo()
+        click.echo("Authorized athlete:")
+        click.echo(f"  id: {athlete.get('id', 'unknown')}")
+        click.echo(f"  name: {athlete_name.strip() or 'unknown'}")
+
+    logger.success("Strava OAuth helper completed")
