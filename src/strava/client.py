@@ -10,10 +10,37 @@ from tenacity import (
     retry,
     stop_after_attempt,
     wait_exponential,
-    retry_if_exception_type,
+    retry_if_exception,
 )
 
 from .models import RateLimitInfo
+
+
+def _is_rate_limit_http_error(error: Exception) -> bool:
+    """Return True when the exception represents an HTTP 429 response."""
+
+    if not isinstance(error, requests.exceptions.HTTPError):
+        return False
+
+    response = getattr(error, "response", None)
+    if response is None:
+        return False
+
+    return response.status_code == 429
+
+
+def _log_rate_limit_retry(retry_state) -> None:
+    """Log retry attempts triggered by rate limiting."""
+
+    sleep_seconds = getattr(getattr(retry_state, "next_action", None), "sleep", 0)
+    attempt_number = getattr(retry_state, "attempt_number", 1)
+
+    message = (
+        "Rate limit hit. Waiting {:.0f}s before retry {}/3...".format(
+            sleep_seconds, attempt_number
+        )
+    )
+    logger.info(message)
 
 
 class StravaApiClient:
@@ -112,10 +139,9 @@ class StravaApiClient:
         wait=wait_exponential(
             multiplier=30, min=30, max=15 * 60
         ),  # 30s, 60s, 120s, then cap at 15min
-        retry=retry_if_exception_type(requests.exceptions.HTTPError),
-        before_sleep=lambda retry_state: logger.info(
-            f"Rate limit hit. Waiting {retry_state.next_action.sleep:.0f}s before retry {retry_state.attempt_number}/3..."
-        ),
+        retry=retry_if_exception(_is_rate_limit_http_error),
+        before_sleep=_log_rate_limit_retry,
+        reraise=True,
     )
     def _make_request_with_retry(
         self, url: str, params: Dict = None
@@ -161,6 +187,29 @@ class StravaApiClient:
             self.check_rate_limit()
 
             return response
+
+        except requests.exceptions.HTTPError as e:
+            response = getattr(e, "response", None)
+            status_code = getattr(response, "status_code", None)
+
+            if status_code == 401:
+                logger.error(
+                    "Unauthorized response from Strava API (HTTP 401). "
+                    "Verify your client credentials and refresh token."
+                )
+            elif status_code == 403:
+                logger.error(
+                    "Forbidden response from Strava API (HTTP 403). "
+                    "Check application permissions and scopes."
+                )
+            elif status_code == 429:
+                logger.error(
+                    "Strava rate limit exceeded after retries. Try again later."
+                )
+            else:
+                logger.error(f"API request failed with status {status_code}: {e}")
+
+            return None
 
         except Exception as e:
             logger.error(f"API request failed: {e}")
