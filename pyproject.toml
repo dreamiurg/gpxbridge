@@ -14,6 +14,7 @@ dependencies = [
     "pydantic-settings>=2.7.1",
     "arrow>=1.3.0",
     "loguru>=0.7.2",
+    "jinja2>=3.1.4",
     "python-slugify>=8.0.4",
     "tenacity>=9.0.0",
 ]
@@ -28,6 +29,9 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools]
 packages = ["src"]
 package-dir = {"" = "."}
+
+[tool.setuptools.package-data]
+"src.strava" = ["templates/*.html"]
 
 [dependency-groups]
 dev = [
