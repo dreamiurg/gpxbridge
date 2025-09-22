@@ -33,8 +33,14 @@ class StravaApiClient:
     def get_access_token(self) -> bool:
         """Exchange refresh token for access token"""
         try:
+            token_url = "https://www.strava.com/oauth/token"
+            logger.debug(
+                "POST {} (grant_type=refresh_token, client_id={})",
+                token_url,
+                self.client_id,
+            )
             response = requests.post(
-                "https://www.strava.com/oauth/token",
+                token_url,
                 data={
                     "client_id": self.client_id,
                     "client_secret": self.client_secret,
@@ -115,7 +121,14 @@ class StravaApiClient:
         self, url: str, params: Dict = None
     ) -> requests.Response:
         """Make HTTP request with automatic retry on rate limit errors"""
+        logger.debug("GET {} params={} ", url, params or {})
         response = requests.get(url, headers=self.get_headers(), params=params or {})
+        logger.debug(
+            "Response {} {} for GET {}",
+            response.status_code,
+            response.reason,
+            url,
+        )
 
         # Update rate limit tracking
         self.update_rate_limit_info(response)
@@ -135,6 +148,7 @@ class StravaApiClient:
         try:
             # Add delay between requests
             if hasattr(self, "_request_count"):
+                logger.debug("Sleeping {:.2f}s before request", self.delay)
                 time.sleep(self.delay)
 
             # Track request count for delay logic
