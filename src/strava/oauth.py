@@ -243,10 +243,16 @@ def _exchange_code_for_tokens(
         response.raise_for_status()
         logger.success("Successfully exchanged authorization code for tokens")
         data = response.json()
-        sanitized_payload = {}
+        sanitized_payload: Dict[str, Any] = {}
         for key, value in data.items():
-            if key == "athlete" or "token" in key.lower():
+            if "token" in key.lower():
                 sanitized_payload[key] = "<redacted>"
+            elif key == "athlete" and isinstance(value, dict):
+                sanitized_payload[key] = {
+                    field: value[field]
+                    for field in ("id", "firstname", "lastname")
+                    if field in value
+                }
             else:
                 sanitized_payload[key] = value
         logger.debug(
