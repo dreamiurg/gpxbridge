@@ -18,8 +18,8 @@ def cli():
     # Configure loguru for better CLI output
     logger.remove()  # Remove default handler
     logger.add(
-        lambda msg: click.echo(msg, err=True),
-        format="<level>{level: <8}</level> | {message}",
+        lambda msg: click.echo(msg, err=True, nl=False),
+        format="{time:YYYY-MM-DD HH:mm:ss}  [<level>{level:<8}</level>]  {message}",
         level="INFO",
         colorize=True,
     )

@@ -8,7 +8,7 @@ Guidance for Codex (and other code-focused agents) working in this repository.
 - **Goal**: Fetch activities from connected services, normalize them to GPX, and export them locally.
 
 ## Quick Start
-1. Install in editable mode: `uv pip install -e .`
+1. Install in editable mode: `uv sync`
 2. Check the CLI: `uv run gpxbridge --help`
 3. Export Strava activities: `uv run gpxbridge strava export --count 5 --output-dir ./exports`
 
