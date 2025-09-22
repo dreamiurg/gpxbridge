@@ -243,9 +243,15 @@ def _exchange_code_for_tokens(
         response.raise_for_status()
         logger.success("Successfully exchanged authorization code for tokens")
         data = response.json()
+        sanitized_payload = {}
+        for key, value in data.items():
+            if key == "athlete" or "token" in key.lower():
+                sanitized_payload[key] = "<redacted>"
+            else:
+                sanitized_payload[key] = value
         logger.debug(
-            "Token exchange response: {}",
-            json.dumps({k: v for k, v in data.items() if k != "access_token"}, indent=2),
+            "Token exchange response (sanitized): {}",
+            json.dumps(sanitized_payload, indent=2),
         )
         return OAuthTokens.from_response(data)
     except requests.exceptions.RequestException as exc:
