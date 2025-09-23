@@ -1,17 +1,24 @@
 # Python-generated files
 __pycache__/
 *.py[oc]
+*.egg-info
+*.egg
 build/
 dist/
 wheels/
-*.egg-info
-*.egg
 
 # Virtual environments
 .venv
 venv/
 env/
 ENV/
+
+# Tool caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.tox/
+.hypothesis/
 
 # IDE and editor files
 .vscode/
@@ -45,18 +52,10 @@ htmlcov/
 coverage.xml
 *.cover
 
-# Testing
-.pytest_cache/
-.tox/
-
 # Environment variables
 .env
 .env.local
 .env.*.local
 
-# Data files
-data/
-
 # Progress files
 .strava_export_progress.json
-.hypothesis/
