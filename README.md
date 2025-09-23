@@ -71,15 +71,23 @@ This fetches your five most recent activities and writes GPX files into `./expor
 - `--delay 2.5` – add extra seconds between API calls when you are close to rate limits
 - `--resume` – resume an interrupted run using `.strava_export_progress.json` inside the export folder
 - `--count 50` – raise or lower how many activities to fetch per run
+- `--activity-type run` – only export activities that match a Strava type or sport type (see Strava docs for [ActivityType](https://developers.strava.com/docs/reference/#api-models-ActivityType) and [SportType](https://developers.strava.com/docs/reference/#api-models-SportType))
+- `--after 2024-01-01` – only export activities that start on or after the given date/time (ISO 8601, accepts `Z` suffix)
+- `--before 2024-02-01T00:00:00Z` – only export activities that start before the given date/time
 
 You can mix options as needed:
 ```bash
 uv run gpxbridge strava export \
   --count 25 \
-  --output-dir ~/gpx-backups \
+  --output-dir ./exports \
   --organize-by-type \
-  --resume
+  --resume \
+  --activity-type Run \
+  --after 2024-01-01 \
+  --before 2024-02-01
 ```
+
+When combining filters with `--resume`, GPXBridge automatically resets progress if the saved resume data was created with different filter values.
 
 ### Checking Available Commands
 ```bash

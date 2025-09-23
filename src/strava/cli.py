@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Optional
 
 import click
 from loguru import logger
@@ -44,8 +45,8 @@ def strava():
 )
 @click.option(
     "--output-dir",
-    default="gpx_exports",
-    help="Output directory for GPX files (default: gpx_exports)",
+    default="exports",
+    help="Output directory for GPX files (default: exports)",
 )
 @click.option(
     "--organize-by-type",
@@ -61,6 +62,28 @@ def strava():
 @click.option(
     "--resume", is_flag=True, help="Resume interrupted export from where it left off"
 )
+@click.option(
+    "--activity-type",
+    type=str,
+    help=(
+        "Only export activities matching this Strava activity type "
+        "(see Strava docs: ActivityType https://developers.strava.com/docs/ref"
+        "erence/#api-models-ActivityType, SportType https://developers.strava.c"
+        "om/docs/reference/#api-models-SportType)"
+    ),
+)
+@click.option(
+    "--after",
+    type=str,
+    metavar="ISO8601",
+    help="Only include activities starting on/after this date/time",
+)
+@click.option(
+    "--before",
+    type=str,
+    metavar="ISO8601",
+    help="Only include activities starting before this date/time",
+)
 def export(
     client_id,
     client_secret,
@@ -70,6 +93,9 @@ def export(
     organize_by_type,
     delay,
     resume,
+    activity_type,
+    after,
+    before,
 ):
     """Export Strava activities as GPX files.
 
@@ -110,6 +136,11 @@ To get credentials:
             )
             raise click.Abort()
 
+        # Parse filters before constructing the config
+        parsed_activity_type = activity_type.strip() if activity_type else None
+        after_dt = _parse_iso_datetime(after, "after")
+        before_dt = _parse_iso_datetime(before, "before")
+
         # Validate export configuration
         config = ExportConfig(
             count=count,
@@ -117,6 +148,9 @@ To get credentials:
             delay_seconds=delay,
             organize_by_type=organize_by_type,
             resume=resume,
+            activity_type=parsed_activity_type,
+            after=after_dt,
+            before=before_dt,
         )
 
         # Show warning for large delay values
@@ -214,13 +248,15 @@ def auth(
     expires_at = datetime.fromtimestamp(tokens.expires_at, tz=timezone.utc)
     click.echo()
     click.echo("Authorization successful! Save these environment variables:")
-    click.echo(f"export STRAVA_CLIENT_ID=\"{client_id}\"")
-    click.echo(f"export STRAVA_CLIENT_SECRET=\"{client_secret}\"")
-    click.echo(f"export STRAVA_REFRESH_TOKEN=\"{tokens.refresh_token}\"")
+    click.echo(f'export STRAVA_CLIENT_ID="{client_id}"')
+    click.echo(f'export STRAVA_CLIENT_SECRET="{client_secret}"')
+    click.echo(f'export STRAVA_REFRESH_TOKEN="{tokens.refresh_token}"')
     click.echo()
     click.echo("Access token details (useful for quick testing):")
     click.echo(f"  token_type: {tokens.token_type}")
-    click.echo(f"  access_token (expires {expires_at.isoformat()}): {tokens.access_token}")
+    click.echo(
+        f"  access_token (expires {expires_at.isoformat()}): {tokens.access_token}"
+    )
     click.echo(f"  scope: {scope}")
 
     athlete = tokens.athlete or {}
@@ -232,3 +268,32 @@ def auth(
         click.echo(f"  name: {athlete_name.strip() or 'unknown'}")
 
     logger.success("Strava OAuth helper completed")
+
+
+def _parse_iso_datetime(value: Optional[str], label: str) -> Optional[datetime]:
+    """Parse ISO8601 date/time strings passed via the CLI."""
+
+    if value is None:
+        return None
+
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+
+    if cleaned.endswith("Z"):
+        cleaned = f"{cleaned[:-1]}+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(cleaned)
+    except ValueError as exc:
+        raise click.BadParameter(
+            f"Invalid {label} value '{value}'. Use ISO 8601 format, e.g. 2024-01-01 or 2024-01-01T12:00:00Z.",
+            param_hint=f"--{label}",
+        ) from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    else:
+        parsed = parsed.astimezone(timezone.utc)
+
+    return parsed

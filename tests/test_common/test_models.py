@@ -1,6 +1,6 @@
-"""
-Tests for common Pydantic models
-"""
+"""Tests for common Pydantic models."""
+
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -174,6 +174,9 @@ class TestExportConfig:
         assert config.delay_seconds == sample_export_config["delay_seconds"]
         assert config.organize_by_type == sample_export_config["organize_by_type"]
         assert config.resume == sample_export_config["resume"]
+        assert config.activity_type is None
+        assert config.after is None
+        assert config.before is None
 
     def test_invalid_count_bounds(self):
         """Test count boundary validation"""
@@ -242,6 +245,46 @@ class TestExportConfig:
         assert config.organize_by_type is True
         assert config.resume is True
 
+    def test_datetime_bounds_validation(self):
+        """Ensure date filters are normalized and validated"""
+
+        after = datetime(2024, 1, 1, 8, tzinfo=timezone.utc)
+        before = datetime(2024, 2, 1, 8, tzinfo=timezone.utc)
+        config = ExportConfig(
+            count=5,
+            output_dir="./test",
+            delay_seconds=1.0,
+            activity_type="Run",
+            after=after,
+            before=before,
+        )
+        assert config.after == after
+        assert config.before == before
+        assert config.activity_type == "Run"
+
+        with pytest.raises(ValidationError) as exc_info:
+            ExportConfig(
+                count=5,
+                output_dir="./test",
+                delay_seconds=1.0,
+                after=before,
+                before=after,
+            )
+
+        assert "'after' must be earlier than 'before'" in str(exc_info.value)
+
+    def test_progress_signature_changes_with_filters(self):
+        """The progress signature should change with filter inputs"""
+
+        base = ExportConfig(count=5, output_dir="./test", delay_seconds=1.0)
+        filtered = ExportConfig(
+            count=5,
+            output_dir="./test",
+            delay_seconds=1.0,
+            activity_type="Run",
+        )
+        assert base.progress_signature() != filtered.progress_signature()
+
 
 class TestProgressData:
     """Test ProgressData model validation"""
@@ -249,16 +292,20 @@ class TestProgressData:
     def test_valid_progress_data(self):
         """Test creating valid progress data"""
         progress = ProgressData(
-            exported_activities=[1, 2, 3, 4, 5], last_activity_index=4
+            exported_activities=[1, 2, 3, 4, 5],
+            last_activity_index=4,
+            config_signature="abc123",
         )
         assert progress.exported_activities == [1, 2, 3, 4, 5]
         assert progress.last_activity_index == 4
+        assert progress.config_signature == "abc123"
 
     def test_default_values(self):
         """Test default values are applied"""
         progress = ProgressData()
         assert progress.exported_activities == []
         assert progress.last_activity_index == 0
+        assert progress.config_signature is None
 
     def test_invalid_activity_ids(self):
         """Test invalid activity IDs validation"""
@@ -277,6 +324,14 @@ class TestProgressData:
         with pytest.raises(ValidationError) as exc_info:
             ProgressData(exported_activities=[1, 2, "invalid", 4])
         assert "unable to parse string" in str(exc_info.value)
+
+    def test_invalid_signature(self):
+        """Progress signature cannot be empty"""
+
+        with pytest.raises(ValidationError) as exc_info:
+            ProgressData(config_signature="   ")
+
+        assert "config_signature cannot be empty" in str(exc_info.value)
 
     def test_invalid_activity_list_type(self):
         """Test non-list activity IDs"""
@@ -310,5 +365,9 @@ class TestProgressData:
         """Test progress data serialization"""
         progress = ProgressData(exported_activities=[1, 2, 3], last_activity_index=2)
         data = progress.model_dump()
-        expected = {"exported_activities": [1, 2, 3], "last_activity_index": 2}
+        expected = {
+            "exported_activities": [1, 2, 3],
+            "last_activity_index": 2,
+            "config_signature": None,
+        }
         assert data == expected
