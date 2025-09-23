@@ -1,6 +1,7 @@
 """Tests for Strava API client retry and error handling."""
 
-from typing import Callable, List
+from datetime import datetime, timezone
+from typing import Callable, Dict, List
 
 import pytest
 import requests
@@ -101,3 +102,64 @@ def test_make_api_request_rate_limit_retries(monkeypatch):
     assert len(calls) == 3
     assert any("Rate limit hit" in log for log in info_logs)
     assert any("Strava rate limit exceeded" in log for log in error_logs)
+
+
+def test_get_recent_activities_filters_by_type(monkeypatch):
+    client = StravaApiClient("id", "secret", "refresh", delay=0)
+    client.access_token = "token"
+
+    pages = [
+        [
+            {"id": 1, "type": "Ride"},
+            {"id": 2, "type": "Run"},
+        ],
+        [
+            {"id": 3, "sport_type": "Run"},
+        ],
+    ]
+
+    def fake_make_api_request(url, params=None):
+        payload = pages.pop(0) if pages else []
+
+        class _Response:
+            def __init__(self, data):
+                self._data = data
+
+            def json(self):
+                return self._data
+
+        return _Response(payload)
+
+    monkeypatch.setattr(client, "make_api_request", fake_make_api_request)
+
+    activities = client.get_recent_activities(2, activity_type="Run")
+
+    assert [activity["id"] for activity in activities] == [2, 3]
+
+
+def test_get_recent_activities_applies_date_params(monkeypatch):
+    client = StravaApiClient("id", "secret", "refresh", delay=0)
+    client.access_token = "token"
+
+    captured_params: List[Dict[str, int]] = []
+
+    def fake_make_api_request(url, params=None):
+        captured_params.append(params or {})
+
+        class _Response:
+            def json(self):
+                return []
+
+        return _Response()
+
+    monkeypatch.setattr(client, "make_api_request", fake_make_api_request)
+
+    after = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    before = datetime(2024, 2, 1, tzinfo=timezone.utc)
+
+    client.get_recent_activities(count=5, after=after, before=before)
+
+    assert captured_params
+    params = captured_params[0]
+    assert params["after"] == int(after.timestamp())
+    assert params["before"] == int(before.timestamp())

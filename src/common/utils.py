@@ -61,13 +61,11 @@ def validate_output_path(output_dir: str) -> Path:
         except ValueError:
             # Path is outside allowed area, use safe default
             logger.warning(
-                f"Output path '{output_dir}' outside safe area, using './gpx_exports'"
+                f"Output path '{output_dir}' outside safe area, using './exports'"
             )
-            return Path("./gpx_exports").resolve()
+            return Path("./exports").resolve()
 
         return path
     except (OSError, ValueError) as e:
-        logger.warning(
-            f"Invalid output path '{output_dir}': {e}, using './gpx_exports'"
-        )
-        return Path("./gpx_exports").resolve()
+        logger.warning(f"Invalid output path '{output_dir}': {e}, using './exports'")
+        return Path("./exports").resolve()

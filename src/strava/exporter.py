@@ -23,7 +23,7 @@ class StravaExporter:
     def export_activity_to_gpx(
         self,
         activity: Dict[str, Any],
-        output_dir: str = "gpx_exports",
+        output_dir: str = "exports",
         organize_by_type: bool = False,
     ) -> bool:
         """Export a single Strava activity to GPX file"""
@@ -143,20 +143,39 @@ class StravaExporter:
 
         # Progress tracking
         progress_file = Path(config.output_dir) / ".strava_export_progress.json"
-        progress = ProgressData()
+        config_signature = config.progress_signature()
+        progress = ProgressData(config_signature=config_signature)
 
         if config.resume:
-            progress = self.load_progress(progress_file)
-            if progress.exported_activities:
-                logger.info(
-                    f"Resuming export from activity {progress.last_activity_index + 1}"
+            existing_progress = self.load_progress(progress_file)
+            if (
+                existing_progress.config_signature
+                and existing_progress.config_signature != config_signature
+            ):
+                logger.warning(
+                    "Progress file filters differ from current request; starting fresh"
                 )
+            else:
+                progress = existing_progress
+                progress.config_signature = config_signature
+                if progress.exported_activities:
+                    logger.info(
+                        f"Resuming export from activity {progress.last_activity_index + 1}"
+                    )
 
         logger.info(f"Fetching {config.count} recent activities...")
-        activities = self.client.get_recent_activities(config.count)
+        activities = self.client.get_recent_activities(
+            config.count,
+            after=config.after,
+            before=config.before,
+            activity_type=config.activity_type,
+        )
 
         if not activities:
-            logger.warning("No activities found")
+            if config.activity_type or config.after or config.before:
+                logger.warning("No activities matched the requested filters")
+            else:
+                logger.warning("No activities found")
             return
 
         # Filter out already exported activities if resuming
@@ -186,6 +205,7 @@ class StravaExporter:
                 success_count += 1
                 progress.exported_activities.append(activity_id)
                 progress.last_activity_index = i
+                progress.config_signature = config_signature
 
                 # Save progress every 5 activities
                 if len(progress.exported_activities) % 5 == 0:

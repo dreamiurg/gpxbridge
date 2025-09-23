@@ -289,7 +289,7 @@ class TestValidateOutputPath:
                 result = validate_output_path(dangerous_path)
                 assert isinstance(result, Path)
                 # Should return safe default path
-                assert "gpx_exports" in str(result)
+                assert "exports" in str(result)
 
     def test_current_directory(self, tmp_path):
         """Test current directory reference"""
@@ -325,7 +325,7 @@ class TestValidateOutputPath:
         with patch("pathlib.Path.cwd", return_value=tmp_path):
             result = validate_output_path("")
             assert isinstance(result, Path)
-            assert "gpx_exports" in str(result)
+            assert "exports" in str(result)
 
     def test_none_path(self, tmp_path):
         """Test None path handling"""
@@ -334,7 +334,7 @@ class TestValidateOutputPath:
             try:
                 result = validate_output_path(None)
                 assert isinstance(result, Path)
-                assert "gpx_exports" in str(result)
+                assert "exports" in str(result)
             except TypeError:
                 # This is acceptable behavior too
                 pass

@@ -1,8 +1,9 @@
-"""
-Strava API client with authentication and rate limiting
-"""
+"""Strava API client with authentication and rate limiting."""
+
+from __future__ import annotations
 
 import time
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, cast
 
 import requests
@@ -213,15 +214,54 @@ class StravaApiClient:
             logger.error(f"API request failed: {e}")
             return None
 
-    def get_recent_activities(self, count: int = 30) -> List[Dict[str, Any]]:
-        """Fetch recent activities from Strava with pagination support"""
+    @staticmethod
+    def _activity_matches_type(activity: Dict[str, Any], target_type: str) -> bool:
+        """Return True when the activity matches the requested type."""
+
+        normalized_target = target_type.lower()
+        legacy_type = str(activity.get("type", "")).lower()
+        sport_type = str(activity.get("sport_type", "")).lower()
+        return normalized_target in {legacy_type, sport_type}
+
+    def get_recent_activities(
+        self,
+        count: int = 30,
+        *,
+        after: Optional[datetime] = None,
+        before: Optional[datetime] = None,
+        activity_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Fetch recent activities from Strava with pagination support."""
+
         activities: List[Dict[str, Any]] = []
         page = 1
         per_page = 200  # Strava API max is 200 per page
 
         logger.info(
-            f"Fetching {count} activities with pagination (max {per_page} per request)..."
+            "Fetching {} activities with pagination (max {} per request)...",
+            count,
+            per_page,
         )
+
+        def to_timestamp(dt: datetime) -> int:
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+            return int(dt.timestamp())
+
+        params_base: Dict[str, Any] = {}
+        if after is not None:
+            params_base["after"] = to_timestamp(after)
+        if before is not None:
+            params_base["before"] = to_timestamp(before)
+
+        if activity_type:
+            logger.info("Filtering activities by type: {}", activity_type)
+        if after:
+            logger.info("Applying 'after' filter: {}", after.isoformat())
+        if before:
+            logger.info("Applying 'before' filter: {}", before.isoformat())
 
         while len(activities) < count:
             try:
@@ -229,31 +269,45 @@ class StravaApiClient:
                 current_per_page = min(per_page, remaining)
 
                 logger.info(
-                    f"  Requesting page {page} with {current_per_page} activities..."
+                    "  Requesting page {} with {} activities...",
+                    page,
+                    current_per_page,
                 )
 
+                params = {"per_page": current_per_page, "page": page, **params_base}
                 response = self.make_api_request(
                     f"{self.base_url}/athlete/activities",
-                    params={"per_page": current_per_page, "page": page},
+                    params=params,
                 )
                 if not response:
                     return activities
-                page_activities = cast(List[Dict[str, Any]], response.json())
 
-                if not page_activities:
-                    # No more activities available
-                    logger.info(f"  No more activities available on page {page}")
+                page_activities_raw = cast(List[Dict[str, Any]], response.json())
+                if activity_type:
+                    page_activities = [
+                        item
+                        for item in page_activities_raw
+                        if self._activity_matches_type(item, activity_type)
+                    ]
+                else:
+                    page_activities = page_activities_raw
+
+                if not page_activities_raw:
+                    logger.info("  No more activities available on page {}", page)
                     break
 
                 activities.extend(page_activities)
                 logger.info(
-                    f"  Retrieved {len(page_activities)} activities (total: {len(activities)})"
+                    "  Retrieved {} activities (total: {})",
+                    len(page_activities),
+                    len(activities),
                 )
 
-                if len(page_activities) < current_per_page:
-                    # Fewer activities returned than requested, we've reached the end
+                if len(page_activities_raw) < current_per_page:
                     logger.info(
-                        f"  Reached end of activities (got {len(page_activities)}, expected {current_per_page})"
+                        "  Reached end of activities (got {}, expected {})",
+                        len(page_activities_raw),
+                        current_per_page,
                     )
                     break
 
@@ -263,7 +317,6 @@ class StravaApiClient:
                 logger.error(f"Failed to fetch activities: {e}")
                 return activities
 
-        # Trim to exact count requested
         activities = activities[:count]
         logger.success(f"Found {len(activities)} recent activities")
         return activities
