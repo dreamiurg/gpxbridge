@@ -17,7 +17,9 @@ from loguru import logger
 
 DEFAULT_SCOPE = "activity:read_all"
 DEFAULT_TIMEOUT = 180
-_DEFAULT_EXPORT_COMMAND = "uv run gpxbridge strava export --count 5 --output-dir ./exports"
+_DEFAULT_EXPORT_COMMAND = (
+    "uv run gpxbridge strava export --count 5 --output-dir ./exports"
+)
 
 _TEMPLATE_ENV: Environment | None = None
 
