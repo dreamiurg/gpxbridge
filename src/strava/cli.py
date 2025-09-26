@@ -185,7 +185,10 @@ To get credentials:
     envvar="STRAVA_CLIENT_ID",
     prompt="Strava client ID",
     show_envvar=True,
-    help="Strava application client ID (set STRAVA_CLIENT_ID to skip prompt)",
+    help=(
+        "Strava application client ID (set STRAVA_CLIENT_ID to skip prompt; "
+        "get it from https://www.strava.com/settings/api)"
+    ),
 )
 @click.option(
     "--client-secret",
